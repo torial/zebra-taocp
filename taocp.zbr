@@ -1,0 +1,630 @@
+# taocp -- algorithms from D. E. Knuth, *The Art of Computer Programming*.
+#
+# Each one names its volume and section and keeps Knuth's step labels (E1, H2, ...) in the
+# comments, so it can be read beside the book. Where the book states an invariant or a
+# precondition, it is a contract here (`require` / `ensure` / `invariant`): checked in an
+# ordinary build, stripped by `--turbo`.
+#
+# Why TAOCP (zebra-language, docs/NEXT_STEPS_to_1.0.md, "the oracle argument"): these have
+# behaviour defined OUTSIDE this repository -- published outputs, worked examples, counts
+# with closed forms -- so a wrong answer is wrong by Knuth's account, not ours.
+#
+# Indices are 0-based, as Zebra lists are; where the book's 1-based subscripts make a step
+# clearer, the code keeps them and subtracts one at the access (`k[j - 1]` for K_j).
+
+# ── Vol. 2 §3.6: the subtractive lagged-Fibonacci generator `ran_array` ──────────────────
+#
+# X_j = (X_{j-100} - X_{j-37}) mod 2^30, seeded by `ran_start`. This is a Zebra rendering of
+# the method Knuth publishes as rng.c (the 9th-printing / 2002 version; the test values are
+# from its 2019 main program). It is a translation of the ALGORITHM, credited to Knuth --
+# not his rng.c, which he asks be copied only unchanged.
+
+const RAN_KK = 100            # the long lag
+const RAN_LL = 37             # the short lag
+const RAN_MM = 1073741824     # the modulus, 2^30
+const RAN_TT = 70             # guaranteed separation between streams
+const RAN_QUALITY = 1009      # Knuth's recommended block size for ran_arr_next
+
+# Subtraction mod 2^30 -- two's complement makes the mask exact for a negative difference.
+def ranModDiff(x: int, y: int): int
+    return (x - y) & (RAN_MM - 1)
+
+class RanArray
+    var x: List(int)          # ran_x: the generator state, RAN_KK values
+    var arr: List(int)        # ran_arr_buf, for next()
+    var ptr: int              # index of the next unread value in arr; -1 = refill
+
+    invariant
+        .x.count() == RAN_KK
+
+    # ran_start. Knuth: the seed selects one of 2^30 - 2 streams, and different seeds give
+    # streams that do not overlap for at least 2^70 values.
+    cue init(seed: int)
+        require
+            seed >= 0
+            seed < RAN_MM - 2
+        .x = List(int)()
+        for i in 0 : RAN_KK
+            .x.add(0)
+        .arr = List(int)()
+        for i in 0 : RAN_QUALITY
+            .arr.add(0)
+        .ptr = -1
+        var buf = List(int)()               # the preparation buffer, KK+KK-1 values
+        for i in 0 : RAN_KK + RAN_KK - 1
+            buf.add(0)
+        var ss: int = (seed + 2) & (RAN_MM - 2)
+        for j in 0 : RAN_KK
+            buf[j] = ss                     # bootstrap the buffer
+            ss = ss << 1
+            if ss >= RAN_MM                 # cyclic shift 29 bits
+                ss -= RAN_MM - 2
+        buf[1] += 1                         # make buf[1] (and only buf[1]) odd
+        ss = seed & (RAN_MM - 1)
+        var t: int = RAN_TT - 1
+        while t > 0
+            var sq: int = RAN_KK - 1        # "square"
+            while sq > 0
+                buf[sq + sq] = buf[sq]
+                buf[sq + sq - 1] = 0
+                sq -= 1
+            var rd: int = RAN_KK + RAN_KK - 2
+            while rd >= RAN_KK
+                buf[rd - (RAN_KK - RAN_LL)] = ranModDiff(buf[rd - (RAN_KK - RAN_LL)], buf[rd])
+                buf[rd - RAN_KK] = ranModDiff(buf[rd - RAN_KK], buf[rd])
+                rd -= 1
+            if (ss & 1) == 1                # "multiply by z"
+                var sh: int = RAN_KK
+                while sh > 0                # shift the buffer cyclically
+                    buf[sh] = buf[sh - 1]
+                    sh -= 1
+                buf[0] = buf[RAN_KK]
+                buf[RAN_LL] = ranModDiff(buf[RAN_LL], buf[RAN_KK])
+            if ss != 0
+                ss = ss >> 1
+            else
+                t -= 1
+        for j in 0 : RAN_LL
+            .x[j + RAN_KK - RAN_LL] = buf[j]
+        for j in RAN_LL : RAN_KK
+            .x[j - RAN_LL] = buf[j]
+        for i in 0 : 10                     # warm things up
+            .fill(buf, RAN_KK + RAN_KK - 1)
+
+    # ran_array: put n new random numbers in aa[0..n). Knuth recommends n >= 1000 and using
+    # only some of each block (see next()).
+    def fill(aa: List(int), n: int)
+        require
+            n >= RAN_KK
+            aa.count() >= n
+        for j in 0 : RAN_KK
+            aa[j] = .x[j]
+        for j in RAN_KK : n
+            aa[j] = ranModDiff(aa[j - RAN_KK], aa[j - RAN_LL])
+        var j: int = n
+        for i in 0 : RAN_LL
+            .x[i] = ranModDiff(aa[j - RAN_KK], aa[j - RAN_LL])
+            j += 1
+        for i in RAN_LL : RAN_KK
+            .x[i] = ranModDiff(aa[j - RAN_KK], .x[i - RAN_LL])
+            j += 1
+
+    # ran_arr_next (exercise 3.6-15): one value at a time. Each refill generates RAN_QUALITY
+    # values and hands out only the first RAN_KK, which is the point -- Knuth's advice for
+    # high-resolution use.
+    def next(): int
+        ensure
+            result >= 0
+            result < RAN_MM
+        if .ptr >= 0
+            if .arr[.ptr] >= 0
+                var v: int = .arr[.ptr]
+                .ptr += 1
+                return v
+        .fill(.arr, RAN_QUALITY)
+        .arr[RAN_KK] = -1
+        .ptr = 1
+        return .arr[0]
+
+# ── Vol. 1 §1.1: Algorithm E, Euclid's algorithm ─────────────────────────────────────────
+def gcd(m: int, n: int): int
+    require
+        m > 0
+        n > 0
+    ensure
+        result > 0
+        m % result == 0
+        n % result == 0
+    var a: int = m
+    var b: int = n
+    while true
+        var r: int = a % b                  # E1. [Find remainder.]
+        if r == 0                           # E2. [Is it zero?]
+            return b
+        a = b                               # E3. [Reduce.]
+        b = r
+
+# ── Vol. 2 §4.5.2: Algorithm B, binary gcd ───────────────────────────────────────────────
+# Stein's algorithm, in Knuth's six steps: subtraction and halving only, no division.
+def binaryGcd(u0: int, v0: int): int
+    require
+        u0 > 0
+        v0 > 0
+    ensure
+        result > 0
+        u0 % result == 0
+        v0 % result == 0
+    var u: int = u0
+    var v: int = v0
+    var k: int = 0
+    while (u & 1) == 0 and (v & 1) == 0     # B1. [Find power of 2.]
+        k += 1
+        u = u >> 1
+        v = v >> 1
+    var t: int = 0                          # B2. [Initialize.]
+    if (u & 1) == 1
+        t = 0 - v
+    else
+        t = u
+    while true
+        while (t & 1) == 0                  # B3/B4. [Halve t.] [Is t even?]
+            t = t / 2                       # exact: t is even, and may be negative
+        if t > 0                            # B5. [Reset max(u, v).]
+            u = t
+        else
+            v = 0 - t
+        t = u - v                           # B6. [Subtract.]
+        if t == 0
+            return u << k
+
+# ── Vol. 2 §4.6.3: Algorithm A, right-to-left binary method for exponentiation ───────────
+# x^n mod m. Invariant (Knuth): x^n = Y * Z^N at step A2. The modulus keeps every product
+# below 2^62, so m must be under 2^31.
+def powMod(x: int, n: int, m: int): int
+    require
+        n >= 0
+        m >= 1
+        m < 2147483648
+    ensure
+        result >= 0
+        result < m
+    var nn: int = n                         # A1. [Initialize.]
+    var y: int = 1 % m
+    var z: int = ((x % m) + m) % m
+    while nn > 0
+        var t: int = nn % 2                 # A2. [Halve N.]
+        nn = nn / 2
+        if t == 1
+            y = (z * y) % m                 # A3. [Multiply Y by Z.]
+            if nn == 0                      # A4. [N = 0?]
+                return y
+        z = (z * z) % m                     # A5. [Square Z.]
+    return y
+
+# ── Vol. 3 §5.2.1: Algorithm S, straight insertion ───────────────────────────────────────
+def insertionSort(k: List(int))
+    ensure
+        isSorted(k)
+    for j in 1 : k.count()                  # S1. [Loop on j.] (0-based: K_2 .. K_N)
+        var key: int = k[j]                 # S2. [Set up i, K, R.]
+        var i: int = j - 1
+        while i >= 0 and key < k[i]         # S3. [Compare K : K_i.]
+            k[i + 1] = k[i]                 # S4. [Move R_i, decrease i.]
+            i -= 1
+        k[i + 1] = key                      # S5. [R into R_{i+1}.]
+
+# ── Vol. 3 §5.2.2: Algorithm Q, quicksort ────────────────────────────────────────────────
+# Partition-exchange with Knuth's small-subfile cutoff: subfiles of M or fewer records are
+# left for one straight-insertion pass at the end (Q9). Knuth finds M = 9 best on MIX; M = 1
+# is pure quicksort. The larger subfile always goes on the stack, so the stack stays under
+# lg N entries. K_{N+1} = +infinity is Knuth's sentinel for step Q3; here the scan is bounded
+# by r instead, which stops at the same place.
+def quickSortM(k: List(int), m: int)
+    require
+        m >= 1
+    ensure
+        isSorted(k)
+    var n: int = k.count()
+    if n > m                                # Q1. [Initialize.]
+        var stack = List(int)()             # pairs (l, r), 1-based
+        var l: int = 1
+        var r: int = n
+        while true
+            var i: int = l                  # Q2. [Begin new stage.]
+            var j: int = r + 1
+            var key: int = k[l - 1]
+            while true
+                i += 1                      # Q3. [Compare K_i : K.]
+                while i <= r and k[i - 1] < key
+                    i += 1
+                j -= 1                      # Q4. [Compare K : K_j.]
+                while key < k[j - 1]
+                    j -= 1
+                if j <= i                   # Q5. [Test i : j.]
+                    var t5: int = k[l - 1]
+                    k[l - 1] = k[j - 1]
+                    k[j - 1] = t5
+                    break
+                var t6: int = k[i - 1]      # Q6. [Exchange.]
+                k[i - 1] = k[j - 1]
+                k[j - 1] = t6
+            # Q7. [Put on stack.] R_j is in its final place; the larger side is stacked.
+            var popped: bool = false
+            if r - j >= j - l and j - l > m
+                stack.add(j + 1)
+                stack.add(r)
+                r = j - 1
+            else if j - l > r - j and r - j > m
+                stack.add(l)
+                stack.add(j - 1)
+                l = j + 1
+            else if r - j > m and m >= j - l
+                l = j + 1
+            else if j - l > m and m >= r - j
+                r = j - 1
+            else
+                popped = true
+            if popped                       # Q8. [Take off stack.]
+                if stack.count() == 0
+                    break
+                # (not `stack.pop()`: it passes the front end and returns a Zig optional,
+                # which zig then refuses as an int -- BUG-545)
+                r = stack[stack.count() - 1]
+                stack.remove(stack.count() - 1)
+                l = stack[stack.count() - 1]
+                stack.remove(stack.count() - 1)
+    if m > 1                                # Q9. [Straight insertion sort.]
+        insertionSort(k)
+
+def quickSort(k: List(int))
+    ensure
+        isSorted(k)
+    quickSortM(k, 9)
+
+# ── Vol. 4A §7.2.1.1: Algorithm G, Gray binary generation ────────────────────────────────
+# The 2^n n-bit codes in Gray order, each differing from the last in exactly one bit, as
+# integers (bit j = a_j). Knuth's loopless parity rule picks the bit to flip.
+def grayCodes(n: int): List(int)
+    require
+        n >= 1
+        n <= 30
+    ensure
+        result.count() == (1 << n)
+    var out = List(int)()
+    var a: int = 0                          # G1. [Initialize.] a_{n-1} .. a_0, as bits
+    var parity: int = 0                     # a_infinity
+    while true
+        out.add(a)                          # G2. [Visit.]
+        parity = 1 - parity                 # G3. [Change parity.]
+        var j: int = 0                      # G4. [Choose j.]
+        if parity == 0
+            j = 1
+            while ((a >> (j - 1)) & 1) == 0  # j - 1 = the position of the rightmost 1
+                j += 1
+        if j == n                           # G5. [Complement coordinate j.]
+            break
+        a = a ^ (1 << j)
+    return out
+
+# ── Vol. 3 §5.2.3: Algorithm H, heapsort ─────────────────────────────────────────────────
+# Sorts k in place into nondecreasing order. N log N in the worst case, in place.
+def heapSort(k: List(int))
+    ensure
+        isSorted(k)
+    var n: int = k.count()
+    if n < 2
+        return
+    var l: int = n / 2 + 1                  # H1. [Initialize.]
+    var r: int = n
+    while true
+        var key: int = 0
+        if l > 1                            # H2. [Decrease l or r.]
+            l -= 1
+            key = k[l - 1]
+        else
+            key = k[r - 1]
+            k[r - 1] = k[0]
+            r -= 1
+            if r == 1
+                k[0] = key
+                return
+        var j: int = l                      # H3. [Prepare for siftup.]
+        var i: int = j
+        while true
+            i = j                           # H4. [Advance downward.]
+            j = j + j
+            if j < r                        # H5. [Find larger child.]
+                if k[j - 1] < k[j]
+                    j += 1
+            else if j > r
+                break
+            if key >= k[j - 1]              # H6. [Larger than K?]
+                break
+            k[i - 1] = k[j - 1]             # H7. [Move it up.]
+        k[i - 1] = key                      # H8. [Store R.]
+
+def isSorted(k: List(int)): bool
+    for i in 1 : k.count()
+        if k[i - 1] > k[i]
+            return false
+    return true
+
+# ── Vol. 3 §6.2.1: Algorithm B, binary search ────────────────────────────────────────────
+# The index of `key` in the sorted list k, or -1.
+#
+# The precondition costs O(N) on an O(log N) search: an ordinary build is linear here, a
+# `--turbo` build logarithmic. Kept, because a binary search over unsorted keys answers
+# confidently and wrongly -- but it is the first place a contract's cost exceeds the
+# algorithm's, which is what a complexity annotation would need to say.
+def binarySearch(k: List(int), key: int): int
+    require
+        isSorted(k)
+    ensure
+        result == -1 or k[result] == key
+    var l: int = 1                          # B1. [Initialize.]
+    var u: int = k.count()
+    while u >= l                            # B2. [Get midpoint.]
+        var i: int = (l + u) / 2
+        if key < k[i - 1]                   # B3. [Compare.]
+            u = i - 1                       # B4. [Adjust u.]
+        else if key > k[i - 1]
+            l = i + 1                       # B5. [Adjust l.]
+        else
+            return i - 1                    # found
+    return -1                               # unsuccessful
+
+# ── Vol. 4A §7.2.1.2: Algorithm L, lexicographic permutation generation ─────────────────
+# Steps a to the next permutation in lexicographic order and answers true, or answers false
+# when a is already the last. Starting from a sorted list it visits every permutation once;
+# a list with repeated values (a multiset) gets each DISTINCT permutation once.
+def nextPermutation(a: List(int)): bool
+    var n: int = a.count()
+    var j: int = n - 2                      # L2. [Find j.]
+    while j >= 0 and a[j] >= a[j + 1]
+        j -= 1
+    if j < 0
+        return false
+    var l: int = n - 1                      # L3. [Increase a_j.]
+    while a[j] >= a[l]
+        l -= 1
+    var tmp: int = a[j]
+    a[j] = a[l]
+    a[l] = tmp
+    var lo: int = j + 1                     # L4. [Reverse a_{j+1} ... a_n.]
+    var hi: int = n - 1
+    while lo < hi
+        tmp = a[lo]
+        a[lo] = a[hi]
+        a[hi] = tmp
+        lo += 1
+        hi -= 1
+    return true
+
+# ── Vol. 4B §7.2.2.1: Algorithm X, exact cover via dancing links ─────────────────────────
+#
+# Items 1..N, of which 1..primary must each be covered EXACTLY once and the rest (secondary)
+# AT MOST once. An option is a list of items; a solution is a set of options covering every
+# primary item exactly once. Knuth's array layout, unchanged: nodes 0..N are the item
+# headers (TOP of a header is its LEN, the number of live options using it), node N+1 is
+# the first spacer, and each option's nodes are followed by a spacer whose TOP is -M (M the
+# option's 1-based number) and whose ULINK / DLINK reach back to the first node of the
+# option before it and forward to the last node of the option after it. The primary items
+# form a circular list headed by 0; the secondary ones a second circle headed by N+1, so
+# step X3 never chooses one.
+class ExactCover
+    var primary: int
+    var items: int            # N
+    var llink: List(int)      # item lists, 0..N+1
+    var rlink: List(int)
+    var top: List(int)        # nodes: TOP (LEN, for a header)
+    var ulink: List(int)
+    var dlink: List(int)
+    var options: int          # M
+    var last_spacer: int      # Z
+
+    cue init(primary: int, secondary: int)
+        require
+            primary >= 1
+            secondary >= 0
+        .primary = primary
+        .items = primary + secondary
+        var n: int = .items
+        .llink = List(int)()
+        .rlink = List(int)()
+        for i in 0 : n + 2
+            .llink.add(0)
+            .rlink.add(0)
+        for i in 1 : primary + 1            # the primary circle, headed by 0
+            .llink[i] = i - 1
+            .rlink[i - 1] = i
+        .llink[0] = primary
+        .rlink[primary] = 0
+        .llink[n + 1] = n + 1               # the secondary circle, headed by N+1
+        .rlink[n + 1] = n + 1
+        if secondary > 0
+            # linked from primary+2 on: starting at primary+1 would set rlink[primary] and
+            # cut the primary circle loose from its header (X3 then never returns to 0)
+            for i in primary + 2 : n + 1
+                .llink[i] = i - 1
+                .rlink[i - 1] = i
+            .llink[primary + 1] = n + 1
+            .rlink[n + 1] = primary + 1
+            .llink[n + 1] = n
+            .rlink[n] = n + 1
+        .top = List(int)()
+        .ulink = List(int)()
+        .dlink = List(int)()
+        for i in 0 : n + 1                  # empty vertical lists: LEN 0, links to self
+            .top.add(0)
+            .ulink.add(i)
+            .dlink.add(i)
+        .top.add(0)                         # node N+1, the first spacer
+        .ulink.add(0)
+        .dlink.add(0)
+        .options = 0
+        .last_spacer = n + 1
+
+    # One option: its items, each 1..N, with no item twice.
+    def addOption(its: List(int))
+        require
+            its.count() >= 1
+        var p: int = .last_spacer
+        var k: int = its.count()
+        for j in 1 : k + 1
+            var it: int = its[j - 1]
+            assert it >= 1 and it <= .items
+            var q: int = .ulink[it]
+            .top.add(it)                    # node p+j
+            .ulink.add(q)
+            .dlink.add(it)
+            .dlink[q] = p + j
+            .ulink[it] = p + j
+            .top[it] += 1                   # LEN(it)
+        .options += 1
+        .dlink[p] = p + k
+        .top.add(0 - .options)              # the next spacer, node p+k+1
+        .ulink.add(p + 1)
+        .dlink.add(0)
+        .last_spacer = p + k + 1
+
+    def hide(p: int)
+        var q: int = p + 1
+        while q != p
+            var x: int = .top[q]
+            var u: int = .ulink[q]
+            var d: int = .dlink[q]
+            if x <= 0
+                q = u                       # a spacer: back to the option's first node
+            else
+                .dlink[u] = d
+                .ulink[d] = u
+                .top[x] -= 1
+                q += 1
+
+    def unhide(p: int)
+        var q: int = p - 1
+        while q != p
+            var x: int = .top[q]
+            var u: int = .ulink[q]
+            var d: int = .dlink[q]
+            if x <= 0
+                q = d                       # a spacer: on to the option's last node
+            else
+                .dlink[u] = q
+                .ulink[d] = q
+                .top[x] += 1
+                q -= 1
+
+    def cover(i: int)
+        var p: int = .dlink[i]
+        while p != i
+            .hide(p)
+            p = .dlink[p]
+        var l: int = .llink[i]
+        var r: int = .rlink[i]
+        .rlink[l] = r
+        .llink[r] = l
+
+    def uncover(i: int)
+        var l: int = .llink[i]
+        var r: int = .rlink[i]
+        .rlink[l] = i
+        .llink[r] = i
+        var p: int = .ulink[i]
+        while p != i
+            .unhide(p)
+            p = .ulink[p]
+
+    # The 0-based number of the option node x belongs to: walk right to its spacer.
+    def optionOf(x: int): int
+        var q: int = x
+        while .top[q] > 0
+            q += 1
+        return 0 - .top[q] - 1
+
+    # Every solution, each as the sorted 0-based numbers of its options; `limit` stops early
+    # (0 = all). Knuth's steps X2..X8 as a state machine on the step number (X1, the
+    # initialisation, is init + addOption).
+    def solutions(limit: int): List(List(int))
+        require
+            limit >= 0
+        var found: List(List(int)) = List(List(int))()
+        var x = List(int)()                 # x_0 .. x_{l-1}
+        var l: int = 0
+        var i: int = 0
+        var step: int = 2
+        while true
+            if step == 2                    # X2. [Enter level l.]
+                if .rlink[0] == 0
+                    var sol = List(int)()
+                    for k in 0 : l
+                        sol.add(.optionOf(x[k]))
+                    sol.sort()
+                    found.add(sol)
+                    if limit > 0 and found.count() >= limit
+                        break
+                    step = 8
+                else
+                    step = 3
+            else if step == 3               # X3. [Choose i.] -- fewest live options (MRV)
+                i = .rlink[0]
+                var theta: int = .top[i]
+                var c: int = .rlink[i]
+                while c != 0
+                    if .top[c] < theta
+                        theta = .top[c]
+                        i = c
+                    c = .rlink[c]
+                .cover(i)                   # X4. [Cover i.]
+                if x.count() <= l
+                    x.add(.dlink[i])
+                else
+                    x[l] = .dlink[i]
+                step = 5
+            else if step == 5               # X5. [Try x_l.]
+                if x[l] == i
+                    step = 7
+                else
+                    var p: int = x[l] + 1
+                    while p != x[l]
+                        var j: int = .top[p]
+                        if j <= 0
+                            p = .ulink[p]
+                        else
+                            .cover(j)
+                            p += 1
+                    l += 1
+                    step = 2
+            else if step == 6               # X6. [Try again.]
+                var p6: int = x[l] - 1
+                while p6 != x[l]
+                    var j6: int = .top[p6]
+                    if j6 <= 0
+                        p6 = .dlink[p6]
+                    else
+                        .uncover(j6)
+                        p6 -= 1
+                i = .top[x[l]]
+                x[l] = .dlink[x[l]]
+                step = 5
+            else if step == 7               # X7. [Backtrack.]
+                .uncover(i)
+                step = 8
+            else                            # X8. [Leave level l.]
+                if l == 0
+                    break
+                l -= 1
+                step = 6
+        return found
+
+# n queens as exact cover (§7.2.2.1): rows and columns PRIMARY, the two diagonal families
+# SECONDARY -- a diagonal may be empty, but never doubly occupied.
+def queens(n: int): ExactCover
+    require
+        n >= 1
+    var diag: int = 2 * n - 1
+    var ec = ExactCover(2 * n, 2 * diag)
+    for r in 0 : n
+        for c in 0 : n
+            ec.addOption([1 + r, 1 + n + c, 1 + 2 * n + (r + c), 1 + 2 * n + diag + (r - c + n - 1)])
+    return ec

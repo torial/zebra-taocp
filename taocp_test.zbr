@@ -1,0 +1,96 @@
+# Every expected value below comes from OUTSIDE this repository: Knuth's published test
+# output, the book's worked examples, or a closed-form count. None was recorded from a run.
+use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens
+
+def countPermutations(start: List(int)): int
+    var a = start.copy()
+    var count: int = 1
+    while nextPermutation(a)
+        count += 1
+    return count
+
+def main()
+    # Vol. 2 §3.6, rng.c's own test (corrected 2019): ran_x[0] = 995235265, both ways.
+    var a = List(int)()
+    for i in 0 : 2009
+        a.add(0)
+    var g1 = RanArray(310952)
+    for m in 0 : 2009
+        g1.fill(a, 1009)
+    var g2 = RanArray(310952)
+    for m in 0 : 1009
+        g2.fill(a, 2009)
+    print("ran_array: ${g1.x[0]} ${g2.x[0]}")         # 995235265 995235265
+
+    # Vol. 1 §1.1: Euclid on the book's example, m = 544, n = 119.
+    print("gcd: ${gcd(544, 119)}")                      # 17
+
+    # Vol. 3 §5.2: Knuth's sixteen standard keys for the sorting chapter.
+    var keys = [503, 87, 512, 61, 908, 170, 897, 275, 653, 426, 154, 509, 612, 677, 765, 703]
+    heapSort(keys)
+    print("heapsort: ${keys}")    # [61, 87, 154, 170, 275, 426, 503, 509, 512, 612, 653, 677, 703, 765, 897, 908]
+
+    # Vol. 3 §6.2.1 on the sorted keys: 653 is the 11th smallest; 400 is absent.
+    print("binary search: ${binarySearch(keys, 653)} ${binarySearch(keys, 400)}")   # 10 -1
+
+    # Vol. 4A §7.2.1.2: n! permutations; a multiset's count is the multinomial coefficient.
+    print("permutations: ${countPermutations([1, 2, 3, 4])} ${countPermutations([1, 1, 2, 2])} ${countPermutations([1, 2, 2, 3, 3, 3])}")   # 24 6 60
+
+    # Vol. 4B §7.2.2.1, Knuth's example (5): items a..g, six options, ONE solution --
+    # options 0 ('c e'), 3 ('a d f') and 4 ('b g').
+    var ex = ExactCover(7, 0)
+    ex.addOption([3, 5])          # c e
+    ex.addOption([1, 4, 7])       # a d g
+    ex.addOption([2, 3, 6])       # b c f
+    ex.addOption([1, 4, 6])       # a d f
+    ex.addOption([2, 7])          # b g
+    ex.addOption([4, 5, 7])       # d e g
+    print("exact cover: ${ex.solutions(0)}")              # [[0, 3, 4]]
+
+    # n queens, n = 1..8: OEIS A000170.
+    var qs = List(int)()
+    for n in 1 : 9
+        qs.add(queens(n).solutions(0).count())
+    print("queens: ${qs}")                                # [1, 0, 0, 2, 10, 4, 40, 92]
+
+    # Vol. 2 §4.5.2: binary gcd must agree with Euclid on every pair -- two of Knuth's
+    # algorithms checking each other. 3600 pairs.
+    var disagree: int = 0
+    for u in 1 : 61
+        for v in 1 : 61
+            if binaryGcd(u, v) != gcd(u, v)
+                disagree += 1
+    print("binary gcd vs Euclid: ${disagree} disagreements")    # 0
+
+    # Vol. 2 §4.6.3 against Fermat's little theorem: a^(p-1) = 1 (mod p), p = 1000000007.
+    var fermat: int = 0
+    for b in 2 : 21
+        if powMod(b, 1000000006, 1000000007) == 1
+            fermat += 1
+    print("fermat: ${fermat}/19, 2^10 mod 1000 = ${powMod(2, 10, 1000)}")   # 19/19, 24
+
+    # Vol. 3 §5.2.2: quicksort (M = 9 and pure, M = 1) and insertion sort against heapsort,
+    # on 1000 keys from the §3.6 generator -- and on Knuth's sixteen keys.
+    var g = RanArray(314159)
+    var base = List(int)()
+    for i in 0 : 1000
+        base.add(g.next() % 10000)
+    var h = base.copy()
+    heapSort(h)
+    var q9 = base.copy()
+    quickSort(q9)
+    var q1 = base.copy()
+    quickSortM(q1, 1)
+    var ins = base.copy()
+    insertionSort(ins)
+    var knuth16 = [503, 87, 512, 61, 908, 170, 897, 275, 653, 426, 154, 509, 612, 677, 765, 703]
+    quickSortM(knuth16, 1)
+    print("sorts agree: ${q9 == h} ${q1 == h} ${ins == h} ${knuth16 == keys}")   # true true true true
+
+    # Vol. 4A §7.2.1.1: Algorithm G against the closed form g(k) = k xor floor(k/2).
+    var codes = grayCodes(10)
+    var gray_bad: int = 0
+    for k in 0 : codes.count()
+        if codes[k] != (k ^ (k >> 1))
+            gray_bad += 1
+    print("gray: ${codes.count()} codes, ${gray_bad} differ from k^(k>>1)")    # 1024 codes, 0 differ
