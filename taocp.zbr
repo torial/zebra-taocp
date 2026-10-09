@@ -267,12 +267,10 @@ def quickSortM(k: List(int), m: int)
             if popped                       # Q8. [Take off stack.]
                 if stack.count() == 0
                     break
-                # (not `stack.pop()`: it passes the front end and returns a Zig optional,
-                # which zig then refuses as an int -- BUG-545)
-                r = stack[stack.count() - 1]
-                stack.remove(stack.count() - 1)
-                l = stack[stack.count() - 1]
-                stack.remove(stack.count() - 1)
+                # pop() throws on an empty list; the stack holds (l, r) pairs and was just
+                # checked non-empty, so the catch cannot fire
+                r = stack.pop() catch 0
+                l = stack.pop() catch 0
     if m > 1                                # Q9. [Straight insertion sort.]
         insertionSort(k)
 

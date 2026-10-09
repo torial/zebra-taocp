@@ -54,8 +54,8 @@ corresponding line (or contract) red. A check never seen red is not evidence.
   O(N) check on an O(log N) search: an ordinary build is linear there, a `--turbo` build
   logarithmic. Kept deliberately — a binary search over unsorted keys answers confidently
   and wrongly — and recorded because a complexity annotation would have to account for it.
-- **Known Zebra issue worked around:** quicksort's stack does not use `List.pop()`, which
-  passes the front end and fails inside zig (zebra-language BUG-545).
+- **Requires zebra-language 0ad017b or later:** quicksort's stack uses `List.pop()`, which
+  throws on an empty list (BUG-545, fixed there); the stack is checked non-empty first.
 
 ## License
 
