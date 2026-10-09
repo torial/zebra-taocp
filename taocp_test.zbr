@@ -1,6 +1,6 @@
 # Every expected value below comes from OUTSIDE this repository: Knuth's published test
 # output, the book's worked examples, or a closed-form count. None was recorded from a run.
-use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128
+use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128, combinations, mpDivide
 
 def countPermutations(start: List(int)): int
     var a = start.copy()
@@ -59,6 +59,106 @@ def bruteNu2(a: int, m: int, t: int, bound: int128): int128
             break
         d[pos] += 1
     return best
+
+# Algorithm C's oracle: count the solutions of a colored exact-cover problem by trying every
+# subset of options. Valid when every primary item is used exactly once, and every secondary
+# item is either used once without a color or used only with one color.
+def bruteColored(primary: int, items: int, opts: List(List(int)), cols: List(List(int))): int
+    var nopt: int = opts.count()
+    var count: int = 0
+    for mask in 1 : (1 << nopt)
+        var uses = List(int)()               # per item: occurrences
+        var colr = List(int)()               # per item: the color seen (-1 none yet, 0 uncolored)
+        var ok: bool = true
+        for it in 0 : items + 1
+            uses.add(0)
+            colr.add(-1)
+        for o in 0 : nopt
+            if ((mask >> o) & 1) == 1
+                for k in 0 : opts[o].count()
+                    var it: int = opts[o][k]
+                    var c: int = cols[o][k]
+                    uses[it] += 1
+                    if it <= primary
+                        if uses[it] > 1
+                            ok = false
+                    else
+                        if c == 0 and uses[it] > 1
+                            ok = false
+                        if colr[it] == 0 and uses[it] > 1
+                            ok = false
+                        if colr[it] > 0 and c != colr[it]
+                            ok = false
+                        colr[it] = c
+        for it in 1 : primary + 1
+            if uses[it] != 1
+                ok = false
+        if ok
+            count += 1
+    return count
+
+# Algorithm D's oracles. Digits are base b, least significant first.
+def mpValue(x: List(int), b: int): int128
+    var bb: int128 = b
+    var v: int128 = 0
+    var k: int = x.count() - 1
+    while k >= 0
+        var dk: int128 = x[k]
+        v = v * bb + dk
+        k -= 1
+    return v
+
+# x * y by schoolbook multiplication (Vol. 2 4.3.1, Algorithm M).
+def mpMul(x: List(int), y: List(int), b: int): List(int)
+    var w = List(int)()
+    for i in 0 : x.count() + y.count()
+        w.add(0)
+    for j in 0 : y.count()
+        var carry: int = 0
+        for i in 0 : x.count()
+            var t: int = x[i] * y[j] + w[i + j] + carry
+            w[i + j] = t % b
+            carry = t / b
+        w[j + x.count()] = carry
+    return w
+
+# x + y (Algorithm A), as many digits as the longer plus one.
+def mpAdd(x: List(int), y: List(int), b: int): List(int)
+    var n: int = x.count()
+    if y.count() > n
+        n = y.count()
+    var w = List(int)()
+    var carry: int = 0
+    for i in 0 : n
+        var s: int = carry
+        if i < x.count()
+            s += x[i]
+        if i < y.count()
+            s += y[i]
+        w.add(s % b)
+        carry = s / b
+    w.add(carry)
+    return w
+
+# -1, 0, 1 as x <, =, > y, ignoring leading zeros.
+def mpCompare(x: List(int), y: List(int)): int
+    var n: int = x.count()
+    if y.count() > n
+        n = y.count()
+    var k: int = n - 1
+    while k >= 0
+        var xk: int = 0
+        var yk: int = 0
+        if k < x.count()
+            xk = x[k]
+        if k < y.count()
+            yk = y[k]
+        if xk != yk
+            if xk < yk
+                return -1
+            return 1
+        k -= 1
+    return 0
 
 def main()
     # Vol. 2 §3.6, rng.c's own test (corrected 2019): ran_x[0] = 995235265, both ways.
@@ -171,3 +271,117 @@ def main()
     var plane: int128 = (9 - 6 * ra + ra * ra) % rm
     var rb3: int128 = bruteNu2(65539, 2147483648, 3, randu[1])
     print("RANDU: nu3^2 = ${randu[1]} (brute ${rb3}), 9 - 6a + a^2 mod m = ${plane}")   # 118 (brute 118), 0
+
+    # Vol. 4B §7.2.2.1, Algorithm C on Knuth's colored example: primary p q r, secondary x y,
+    # colors A = 1, B = 2. Options: 'p q x y:A', 'p r x:A y', 'p x:B', 'q x:A', 'r y:B'.
+    # The one solution is 'p r x:A y' with 'q x:A' -- x used twice, both times as A.
+    var kc = ExactCover(3, 2)
+    kc.addColoredOption([1, 2, 4, 5], [0, 0, 0, 1])
+    kc.addColoredOption([1, 3, 4, 5], [0, 0, 1, 0])
+    kc.addColoredOption([1, 4], [0, 2])
+    kc.addColoredOption([2, 4], [0, 1])
+    kc.addColoredOption([3, 5], [0, 2])
+    print("colored example: ${kc.solutions(0)}")                    # [[1, 3]]
+
+    # Algorithm C against exhaustive search on 50 generated problems: 4 primary items,
+    # 2 secondary, 10-12 options, colors 0..2.
+    var cg = RanArray(271828)
+    var c_agree: int = 0
+    var c_total_sol: int = 0
+    for trial in 0 : 50
+        var nopt: int = 10 + cg.next() % 3
+        var opts: List(List(int)) = List(List(int))()
+        var cols: List(List(int)) = List(List(int))()
+        var ec = ExactCover(4, 2)
+        for o in 0 : nopt
+            var its = List(int)()
+            var cs = List(int)()
+            for it in 1 : 5                  # each primary with probability 1/3
+                if cg.next() % 3 == 0
+                    its.add(it)
+                    cs.add(0)
+            if its.count() == 0
+                its.add(1 + cg.next() % 4)
+                cs.add(0)
+            for it in 5 : 7                  # each secondary with probability 1/2, color 0..2
+                if cg.next() % 2 == 0
+                    its.add(it)
+                    cs.add(cg.next() % 3)
+            opts.add(its)
+            cols.add(cs)
+            ec.addColoredOption(its, cs)
+        var got: int = ec.solutions(0).count()
+        c_total_sol += got
+        if got == bruteColored(4, 6, opts, cols)
+            c_agree += 1
+    print("colored vs brute force: ${c_agree}/50 agree (${c_total_sol} solutions in all)")
+
+    # Vol. 4A 7.2.1.3, Algorithm L against the bitmasks with t bits set, in increasing order
+    # (colex order IS increasing bitmask order), for every 1 <= t <= n <= 10.
+    var comb_ok: int = 0
+    var comb_all: int = 0
+    for n in 1 : 11
+        for t in 1 : n + 1
+            comb_all += 1
+            var got = combinations(n, t)
+            var masks = List(int)()
+            for mask in 0 : (1 << n)
+                var bits: int = 0
+                for bi in 0 : n
+                    if ((mask >> bi) & 1) == 1
+                        bits += 1
+                if bits == t
+                    masks.add(mask)
+            var same: bool = got.count() == masks.count()
+            if same
+                for k in 0 : got.count()
+                    var mk: int = 0
+                    for e in got[k]
+                        mk += (1 << e)
+                    if mk != masks[k]
+                        same = false
+            if same
+                comb_ok += 1
+    print("combinations vs bitmasks: ${comb_ok}/${comb_all}, C(10,5) = ${combinations(10, 5).count()}")   # 55/55, 252
+
+    # Vol. 2 4.3.1, Algorithm D. Base 2^8, 3000 random divisions small enough for int128;
+    # step D6 is rare (about 2/b of the time), so the count of add-backs is printed -- the
+    # path must actually have run for the agreement to cover it.
+    var dg = RanArray(161803)
+    var d_ok: int = 0
+    var d_addbacks: int = 0
+    for trial in 0 : 3000
+        var n: int = 2 + dg.next() % 4
+        var m: int = dg.next() % 7
+        var v = List(int)()
+        for i in 0 : n
+            v.add(dg.next() % 256)
+        if v[n - 1] == 0
+            v[n - 1] = 1 + dg.next() % 255
+        var u = List(int)()
+        for i in 0 : m + n
+            u.add(dg.next() % 256)
+        var res = mpDivide(u, v, 256)
+        d_addbacks += res[2][0]
+        var uv: int128 = mpValue(u, 256)
+        var vv: int128 = mpValue(v, 256)
+        if mpValue(res[0], 256) == uv / vv and mpValue(res[1], 256) == uv % vv
+            d_ok += 1
+    # Base 2^16, 300 divisions too large for int128: u = q v + r and r < v.
+    var big_ok: int = 0
+    for trial in 0 : 300
+        var n: int = 2 + dg.next() % 10
+        var m: int = dg.next() % 20
+        var v = List(int)()
+        for i in 0 : n
+            v.add(dg.next() % 65536)
+        if v[n - 1] == 0
+            v[n - 1] = 1 + dg.next() % 65535
+        var u = List(int)()
+        for i in 0 : m + n
+            u.add(dg.next() % 65536)
+        var res = mpDivide(u, v, 65536)
+        var back = mpAdd(mpMul(res[0], v, 65536), res[1], 65536)
+        if mpCompare(back, u) == 0 and mpCompare(res[1], v) < 0
+            big_ok += 1
+    print("division: ${d_ok}/3000 vs int128 (${d_addbacks} add-backs), ${big_ok}/300 by u = qv + r")

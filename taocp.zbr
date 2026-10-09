@@ -409,6 +409,12 @@ def nextPermutation(a: List(int)): bool
 # option before it and forward to the last node of the option after it. The primary items
 # form a circular list headed by 0; the secondary ones a second circle headed by N+1, so
 # step X3 never chooses one.
+#
+# Algorithm C (§7.2.2.1, "color controls") is built in: a secondary item in an option may
+# carry a COLOR, and a solution may then use that item in any number of chosen options as
+# long as they all give it the SAME color (an uncolored use still means "at most once").
+# With no colors the code below IS Algorithm X: hide/unhide skip only purified nodes
+# (COLOR < 0), and commit/uncommit reduce to cover/uncover.
 class ExactCover
     var primary: int
     var items: int            # N
@@ -417,6 +423,7 @@ class ExactCover
     var top: List(int)        # nodes: TOP (LEN, for a header)
     var ulink: List(int)
     var dlink: List(int)
+    var color: List(int)      # nodes: COLOR (0 none, > 0 a color, -1 purified during search)
     var options: int          # M
     var last_spacer: int      # Z
 
@@ -452,29 +459,42 @@ class ExactCover
         .top = List(int)()
         .ulink = List(int)()
         .dlink = List(int)()
+        .color = List(int)()
         for i in 0 : n + 1                  # empty vertical lists: LEN 0, links to self
             .top.add(0)
             .ulink.add(i)
             .dlink.add(i)
+            .color.add(0)
         .top.add(0)                         # node N+1, the first spacer
         .ulink.add(0)
         .dlink.add(0)
+        .color.add(0)
         .options = 0
         .last_spacer = n + 1
 
     # One option: its items, each 1..N, with no item twice.
     def addOption(its: List(int))
+        var none = List(int)()
+        for i in 0 : its.count()
+            none.add(0)
+        .addColoredOption(its, none)
+
+    # An option whose items carry colors (0 = none). Only a SECONDARY item may be colored.
+    def addColoredOption(its: List(int), cols: List(int))
         require
             its.count() >= 1
+            cols.count() == its.count()
         var p: int = .last_spacer
         var k: int = its.count()
         for j in 1 : k + 1
             var it: int = its[j - 1]
             assert it >= 1 and it <= .items
             var q: int = .ulink[it]
+            assert cols[j - 1] == 0 or it > .primary, "only a secondary item can carry a color"
             .top.add(it)                    # node p+j
             .ulink.add(q)
             .dlink.add(it)
+            .color.add(cols[j - 1])
             .dlink[q] = p + j
             .ulink[it] = p + j
             .top[it] += 1                   # LEN(it)
@@ -483,6 +503,7 @@ class ExactCover
         .top.add(0 - .options)              # the next spacer, node p+k+1
         .ulink.add(p + 1)
         .dlink.add(0)
+        .color.add(0)
         .last_spacer = p + k + 1
 
     def hide(p: int)
@@ -493,6 +514,8 @@ class ExactCover
             var d: int = .dlink[q]
             if x <= 0
                 q = u                       # a spacer: back to the option's first node
+            else if .color[q] < 0
+                q += 1                      # purified: already out of play (hide')
             else
                 .dlink[u] = d
                 .ulink[d] = u
@@ -507,6 +530,8 @@ class ExactCover
             var d: int = .dlink[q]
             if x <= 0
                 q = d                       # a spacer: on to the option's last node
+            else if .color[q] < 0
+                q -= 1                      # purified (unhide')
             else
                 .dlink[u] = q
                 .ulink[d] = q
@@ -532,6 +557,43 @@ class ExactCover
         while p != i
             .unhide(p)
             p = .ulink[p]
+
+    # Algorithm C: choosing an option that gives secondary item j color c keeps every other
+    # option that gives j the same color, and hides the rest (purify); an uncolored use
+    # covers j outright. commit/uncommit pick between them.
+    def purify(p: int)
+        var c: int = .color[p]
+        var it: int = .top[p]
+        var q: int = .dlink[it]
+        while q != it
+            if .color[q] == c
+                .color[q] = -1
+            else
+                .hide(q)
+            q = .dlink[q]
+
+    def unpurify(p: int)
+        var c: int = .color[p]
+        var it: int = .top[p]
+        var q: int = .ulink[it]
+        while q != it
+            if .color[q] < 0
+                .color[q] = c
+            else
+                .unhide(q)
+            q = .ulink[q]
+
+    def commit(p: int, j: int)
+        if .color[p] == 0
+            .cover(j)
+        else if .color[p] > 0
+            .purify(p)
+
+    def uncommit(p: int, j: int)
+        if .color[p] == 0
+            .uncover(j)
+        else if .color[p] > 0
+            .unpurify(p)
 
     # The 0-based number of the option node x belongs to: walk right to its spacer.
     def optionOf(x: int): int
@@ -589,7 +651,7 @@ class ExactCover
                         if j <= 0
                             p = .ulink[p]
                         else
-                            .cover(j)
+                            .commit(p, j)
                             p += 1
                     l += 1
                     step = 2
@@ -600,7 +662,7 @@ class ExactCover
                     if j6 <= 0
                         p6 = .dlink[p6]
                     else
-                        .uncover(j6)
+                        .uncommit(p6, j6)
                         p6 -= 1
                 i = .top[x[l]]
                 x[l] = .dlink[x[l]]
@@ -821,3 +883,113 @@ def spectralTest(a: int, m: int, tmax: int): List(int128)
                     break
         out.add(s)
     return out
+
+# -- Vol. 4A 7.2.1.3: Algorithm L, lexicographic combinations --------------------------------
+# Every t-combination of {0, ..., n-1}, each as its elements in increasing order, visited in
+# Knuth's order: lexicographic in the DECREASING sequence c_t ... c_1 -- colex, which is also
+# increasing order of the bitmask 2^c_1 + ... + 2^c_t.
+def combinations(n: int, t: int): List(List(int))
+    require
+        n >= t
+        t >= 1
+    var out: List(List(int)) = List(List(int))()
+    var c = List(int)()                      # c_1 .. c_t, then the sentinels c_{t+1}, c_{t+2}
+    for j in 1 : t + 1                       # L1. [Initialize.]
+        c.add(j - 1)
+    c.add(n)
+    c.add(0)
+    while true
+        var comb = List(int)()               # L2. [Visit.]
+        for j in 0 : t
+            comb.add(c[j])
+        out.add(comb)
+        var j: int = 0                       # L3. [Find j.] (0-based: c[0] is c_1)
+        while c[j] + 1 == c[j + 1]
+            c[j] = j
+            j += 1
+        if j >= t                            # L4. [Done?]
+            break
+        c[j] += 1                            # L5. [Increase c_j.]
+    return out
+
+# -- Vol. 2 4.3.1: Algorithm D, division of nonnegative integers -------------------------------
+# Digits are base b, LEAST significant first. u has m + n digits, v has n >= 2 digits with a
+# nonzero leading digit; the result is [q (m + 1 digits), r (n digits), [add-backs]], where
+# add-backs counts how often step D6 ran -- Knuth's rare correction, which a test has to see
+# happen before it can claim the step works. b up to 2^16 keeps every product in an int.
+def mpDivide(u: List(int), v: List(int), b: int): List(List(int))
+    require
+        v.count() >= 2
+        v[v.count() - 1] != 0
+        u.count() >= v.count()
+        b >= 4
+        b <= 65536
+    var n: int = v.count()
+    var m: int = u.count() - n
+    var d: int = b / (v[n - 1] + 1)          # D1. [Normalize.]
+    var un = List(int)()
+    var carry: int = 0
+    for i in 0 : m + n
+        var pu: int = u[i] * d + carry
+        un.add(pu % b)
+        carry = pu / b
+    un.add(carry)
+    var vn = List(int)()
+    carry = 0
+    for i in 0 : n
+        var pv: int = v[i] * d + carry
+        vn.add(pv % b)
+        carry = pv / b
+    assert carry == 0, "normalising v must not add a digit"
+    var q = List(int)()
+    for i in 0 : m + 1
+        q.add(0)
+    var addbacks: int = 0
+    var j: int = m                           # D2. [Initialize j.]
+    while j >= 0
+        var num: int = un[j + n] * b + un[j + n - 1]    # D3. [Calculate q-hat.]
+        var qhat: int = num / vn[n - 1]
+        var rhat: int = num % vn[n - 1]
+        while rhat < b and (qhat == b or qhat * vn[n - 2] > b * rhat + un[j + n - 2])
+            qhat -= 1
+            rhat += vn[n - 1]
+        var borrow: int = 0                  # D4. [Multiply and subtract.]
+        carry = 0
+        for i in 0 : n
+            var p: int = qhat * vn[i] + carry
+            carry = p / b
+            var sub: int = un[i + j] - p % b - borrow
+            if sub < 0
+                un[i + j] = sub + b
+                borrow = 1
+            else
+                un[i + j] = sub
+                borrow = 0
+        var top: int = un[j + n] - carry - borrow
+        var negative: bool = top < 0
+        if negative
+            top += b
+        un[j + n] = top
+        q[j] = qhat                          # D5. [Test remainder.]
+        if negative                          # D6. [Add back.]
+            q[j] -= 1
+            addbacks += 1
+            carry = 0
+            for i in 0 : n
+                var s: int = un[i + j] + vn[i] + carry
+                un[i + j] = s % b
+                carry = s / b
+            un[j + n] = (un[j + n] + carry) % b
+        j -= 1                               # D7. [Loop on j.]
+    var r = List(int)()                      # D8. [Unnormalize.] r = (u_{n-1} .. u_0) / d
+    for i in 0 : n
+        r.add(0)
+    var rem: int = 0
+    var k: int = n - 1
+    while k >= 0
+        var cur: int = rem * b + un[k]
+        r[k] = cur / d
+        rem = cur % d
+        k -= 1
+    assert rem == 0, "the normalised remainder is a multiple of d"
+    return [q, r, [addbacks]]
