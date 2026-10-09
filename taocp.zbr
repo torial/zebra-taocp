@@ -626,3 +626,198 @@ def queens(n: int): ExactCover
         for c in 0 : n
             ec.addOption([1 + r, 1 + n + c, 1 + 2 * n + (r + c), 1 + 2 * n + diag + (r - c + n - 1)])
     return ec
+
+# ── Vol. 2 §3.3.4: Algorithm S, the spectral test ─────────────────────────────────────────
+#
+# For the linear congruential sequence X_{n+1} = (a X_n + c) mod m, nu_t is the length of the
+# shortest nonzero vector (s_1, ..., s_t) with s_1 + s_2 a + ... + s_t a^(t-1) = 0 (mod m):
+# 1/nu_t is the distance between the parallel hyperplanes covering the points
+# (X_n, ..., X_{n+t-1}). A good multiplier has every nu_t large. These return nu_t SQUARED,
+# exactly, for t = 2 .. tmax. 128-bit arithmetic throughout: with m near 2^31 the dot products
+# in steps S5-S7 pass 2^62.
+
+# floor(n / d) for d > 0 (integer `/` truncates toward zero).
+def floorDiv128(n: int128, d: int128): int128
+    require
+        d > 0
+    var q: int128 = n / d
+    if n % d != 0 and n < 0
+        q -= 1
+    return q
+
+# Knuth's round(x) = floor(x + 1/2), of the rational n / d, d > 0.
+def roundDiv128(n: int128, d: int128): int128
+    require
+        d > 0
+    return floorDiv128(2 * n + d, 2 * d)
+
+# floor(sqrt(n)), by Newton's method on integers.
+def isqrt128(n: int128): int128
+    require
+        n >= 0
+    ensure
+        result * result <= n
+        (result + 1) * (result + 1) > n
+    if n < 2
+        return n
+    var x: int128 = n
+    var y: int128 = (x + n / x) / 2
+    while y < x
+        x = y
+        y = (x + n / x) / 2
+    return x
+
+def dot128(x: List(int128), y: List(int128)): int128
+    var sum: int128 = 0
+    for i in 0 : x.count()
+        sum += x[i] * y[i]
+    return sum
+
+def spectralTest(a: int, m: int, tmax: int): List(int128)
+    require
+        m > 1
+        a > 0
+        a < m
+        tmax >= 2
+        tmax <= 8
+    ensure
+        result.count() == tmax - 1
+    var out = List(int128)()
+    var mm: int128 = m
+    var aa: int128 = a
+    var h: int128 = a                       # S1. [Initialize.]
+    var hp: int128 = m
+    var p: int128 = 1
+    var pp: int128 = 0
+    var r: int128 = a
+    var s: int128 = 1 + h * h
+    var u: int128 = 0
+    var v: int128 = 0
+    while true                              # S2. [Euclidean step.]
+        var q: int128 = hp / h
+        u = hp - q * h
+        v = pp - q * p
+        if u * u + v * v < s
+            s = u * u + v * v
+            hp = h
+            h = u
+            pp = p
+            p = v
+            if h == 0
+                break
+        else
+            break
+    u = u - h                               # S3. [Compute nu_2.]
+    v = v - p
+    if u * u + v * v < s
+        s = u * u + v * v
+        hp = u
+        pp = v
+    out.add(s)
+    var U: List(List(int128)) = List(List(int128))()
+    var V: List(List(int128)) = List(List(int128))()
+    U.add([0 - h, p])
+    U.add([0 - hp, pp])
+    # V = +-(p' h'; -p -h). The sign is the one that makes U V^T = m I -- Knuth's invariant,
+    # asserted below after every transformation -- so it is DERIVED from U_1 . V_1 rather
+    # than remembered: getting it backwards leaves nu_2 right (S3 computes it directly) and
+    # every later nu_t too large, which is how this was found.
+    var sg: int128 = 1
+    if p * hp - h * pp < 0
+        sg = -1
+    V.add([sg * pp, sg * hp])
+    V.add([0 - sg * p, 0 - sg * h])
+    var t: int = 2
+    while t < tmax                          # S4. [Advance t.]
+        t += 1
+        r = (aa * r) % mm
+        for i in 0 : t - 1
+            U[i].add(0)
+            V[i].add(0)
+        var ut = List(int128)()
+        var vt = List(int128)()
+        for i in 0 : t
+            ut.add(0)
+            vt.add(0)
+        ut[0] = 0 - r
+        ut[t - 1] = 1
+        vt[t - 1] = mm
+        for i in 0 : t - 1
+            var q4: int128 = roundDiv128(V[i][0] * r, mm)
+            # V_i's new coordinate is v_i1 r, reduced by q m: the V rows generate the
+            # lattice spanned by (1, a, ..., a^(t-1)) and m e_j, so a row whose first
+            # coordinate is v_i1 needs v_i1 r (mod m) in the new place. (Extending with 0
+            # leaves U_t . V_i = -r v_i1, and the invariant check below fails at once.)
+            V[i][t - 1] = V[i][0] * r - q4 * mm
+            for c in 0 : t
+                ut[c] = ut[c] + q4 * U[i][c]
+        U.add(ut)
+        V.add(vt)
+        var uu: int128 = dot128(ut, ut)
+        if uu < s
+            s = uu
+        var k: int = t - 1
+        var j: int = 0
+        while true
+            for i in 0 : t                  # S5. [Transform.]
+                if i != j
+                    var vij: int128 = dot128(V[i], V[j])
+                    var vjj: int128 = dot128(V[j], V[j])
+                    var avij: int128 = vij
+                    if avij < 0
+                        avij = 0 - avij
+                    if 2 * avij > vjj
+                        var q5: int128 = roundDiv128(vij, vjj)
+                        for c in 0 : t
+                            V[i][c] = V[i][c] - q5 * V[j][c]
+                            U[j][c] = U[j][c] + q5 * U[i][c]
+                        k = j
+            if j == t - 1                   # S6. [Advance j.]
+                j = 0
+            else
+                j += 1
+            if j == k
+                break
+        for i in 0 : t                      # the invariant: U_i . V_j = m [i = j]
+            for jj in 0 : t
+                var want: int128 = 0
+                if i == jj
+                    want = mm
+                assert dot128(U[i], V[jj]) == want, "spectral test: U V^T != m I"
+        var X = List(int128)()              # S7. [Prepare for search.]
+        var Y = List(int128)()
+        var z = List(int128)()
+        for i in 0 : t
+            X.add(0)
+            Y.add(0)
+            z.add(isqrt128((dot128(V[i], V[i]) * s) / (mm * mm)))
+        var kk: int = t - 1                 # 0-based k
+        var step: int = 8
+        while true
+            if step == 8                    # S8. [Advance X_k.]
+                if X[kk] == z[kk]
+                    step = 10
+                else
+                    X[kk] += 1
+                    for c in 0 : t
+                        Y[c] = Y[c] + U[kk][c]
+                    step = 9
+            else if step == 9               # S9. [Advance k.]
+                kk += 1
+                while kk <= t - 1
+                    X[kk] = 0 - z[kk]
+                    for c in 0 : t
+                        Y[c] = Y[c] - 2 * z[kk] * U[kk][c]
+                    kk += 1
+                var yy: int128 = dot128(Y, Y)
+                if yy < s
+                    s = yy
+                step = 10
+            else                            # S10. [Decrease k.]
+                kk -= 1
+                if kk >= 0
+                    step = 8
+                else
+                    break
+        out.add(s)
+    return out

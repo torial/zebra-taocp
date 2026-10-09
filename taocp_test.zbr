@@ -1,6 +1,6 @@
 # Every expected value below comes from OUTSIDE this repository: Knuth's published test
 # output, the book's worked examples, or a closed-form count. None was recorded from a run.
-use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens
+use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128
 
 def countPermutations(start: List(int)): int
     var a = start.copy()
@@ -8,6 +8,57 @@ def countPermutations(start: List(int)): int
     while nextPermutation(a)
         count += 1
     return count
+
+# The spectral test's oracle: the shortest nonzero (s_1..s_t) with
+# s_1 + s_2 a + ... + s_t a^(t-1) = 0 (mod m), by exhaustive search over |s_i| <= sqrt(bound)
+# for i >= 2, s_1 taken as the centred residue (the shortest choice). Using Algorithm S's own
+# answer as `bound` is sound both ways: too large, and the true shorter vector is inside the
+# box; too small, and the search finds nothing that short and answers -1. A box over
+# 250,000 points is not searched: -2, "too large to check", reported as such -- never as
+# agreement.
+def bruteNu2(a: int, m: int, t: int, bound: int128): int128
+    var mm: int128 = m
+    var aa: int128 = a
+    var B: int128 = isqrt128(bound)
+    var points: int128 = 1
+    for i in 0 : t - 1
+        points = points * (2 * B + 1)
+    if points > 250000
+        return -2
+    var pw = List(int128)()                  # a^(i-1) mod m
+    var pv: int128 = 1
+    for i in 0 : t
+        pw.add(pv)
+        pv = (pv * aa) % mm
+    var d = List(int128)()                   # s_2 .. s_t, an odometer over [-B, B]
+    for i in 0 : t - 1
+        d.add(0 - B)
+    var best: int128 = -1
+    while true
+        var sum: int128 = 0
+        var sq: int128 = 0
+        var allzero: bool = true
+        for i in 0 : t - 1
+            sum += d[i] * pw[i + 1]
+            sq += d[i] * d[i]
+            if d[i] != 0
+                allzero = false
+        if not allzero
+            var c: int128 = floorDiv128(0 - sum, mm)
+            c = (0 - sum) - c * mm                # (-sum) mod m, in [0, m)
+            if 2 * c > mm
+                c -= mm
+            var len: int128 = c * c + sq
+            if len <= bound and (best < 0 or len < best)
+                best = len
+        var pos: int = 0                     # advance the odometer
+        while pos < t - 1 and d[pos] == B
+            d[pos] = 0 - B
+            pos += 1
+        if pos == t - 1
+            break
+        d[pos] += 1
+    return best
 
 def main()
     # Vol. 2 §3.6, rng.c's own test (corrected 2019): ran_x[0] = 995235265, both ways.
@@ -94,3 +145,29 @@ def main()
         if codes[k] != (k ^ (k >> 1))
             gray_bad += 1
     print("gray: ${codes.count()} codes, ${gray_bad} differ from k^(k>>1)")    # 1024 codes, 0 differ
+
+    # Vol. 2 §3.3.4, Algorithm S against exhaustive search, nu_2..nu_5 for 16 generators.
+    var spec_checked: int = 0
+    var spec_agree: int = 0
+    var spec_toobig: int = 0
+    for mod in [1009, 65537]
+        for mult in [2, 3, 5, 17, 75, 101, 500, mod - 1]
+            var nus = spectralTest(mult, mod, 5)
+            for ti in 0 : nus.count()
+                var bf: int128 = bruteNu2(mult, mod, ti + 2, nus[ti])
+                if bf == -2
+                    spec_toobig += 1
+                else
+                    spec_checked += 1
+                    if bf == nus[ti]
+                        spec_agree += 1
+    print("spectral vs brute force: ${spec_agree}/${spec_checked} agree (${spec_toobig} too large to search)")
+    # RANDU, a = 65539, m = 2^31: a^2 = 6a - 9 (mod m), so (9, -6, 1) lies in the dual lattice
+    # and nu_3^2 = 9^2 + 6^2 + 1 = 118 -- every point of its "random" triples sits on one of
+    # only 15 planes (Marsaglia). Algorithm S must find exactly that, and nothing shorter.
+    var randu = spectralTest(65539, 2147483648, 4)
+    var ra: int128 = 65539
+    var rm: int128 = 2147483648
+    var plane: int128 = (9 - 6 * ra + ra * ra) % rm
+    var rb3: int128 = bruteNu2(65539, 2147483648, 3, randu[1])
+    print("RANDU: nu3^2 = ${randu[1]} (brute ${rb3}), 9 - 6a + a^2 mod m = ${plane}")   # 118 (brute 118), 0

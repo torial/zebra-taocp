@@ -26,6 +26,7 @@ contract (`require` / `ensure` / `invariant`): checked in an ordinary build, rem
 |---|---|---|
 | `RanArray` — subtractive lagged-Fibonacci generator (`ran_start`, `ran_array`, `ran_arr_next`) | Vol. 2 §3.6 | Knuth's own `rng.c` test: `ran_x[0] = 995235265`, reached two ways |
 | `gcd` — Algorithm E (Euclid) | Vol. 1 §1.1 | the book's example: gcd(544, 119) = 17 |
+| `spectralTest` — Algorithm S, ν₂..ν_t for a linear congruential generator | Vol. 2 §3.3.4 | exhaustive search on 16 generators (64/64); RANDU's ν₃² = 118, from 9 − 6a + a² ≡ 0 (mod 2³¹) -- its triples lie on 15 planes; the invariant U·Vᵀ = m·I asserted after every reduction |
 | `binaryGcd` — Algorithm B | Vol. 2 §4.5.2 | agrees with Algorithm E on all 3,600 pairs 1..60 |
 | `powMod` — Algorithm A, right-to-left binary powers | Vol. 2 §4.6.3 | Fermat's little theorem for p = 1000000007, bases 2..20 |
 | `insertionSort` — Algorithm S | Vol. 3 §5.2.1 | agrees with heapsort on 1,000 generated keys |
@@ -47,6 +48,11 @@ corresponding line (or contract) red. A check never seen red is not evidence.
   implements (the 9th-printing / 2002 version), credited to Knuth, with his 2019 test values.
 - **Indices are 0-based.** Where the book's 1-based subscripts make a step clearer, the code
   keeps them and subtracts one at the access (`k[j - 1]` for K_j).
+- **The spectral test was wrong twice before it was right, and the checks found both.** A
+  misremembered sign in step S3 and a misremembered coordinate in step S4 each left ν₂
+  correct (S3 computes it directly) and every later ν_t too large. Exhaustive search caught
+  13 disagreements; asserting Knuth's invariant U·Vᵀ = m·I named the faulty step. It runs in
+  128-bit integers: with m near 2³¹ the dot products pass 2⁶².
 - **Algorithm Q drops the K_{N+1} = +∞ sentinel** and bounds step Q3's scan by `r`, which
   stops at the same place. Algorithm X keeps Knuth's array layout (item headers, spacers,
   TOP/ULINK/DLINK) unchanged, as a state machine over steps X2–X8.
