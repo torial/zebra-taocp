@@ -80,6 +80,10 @@ contracts, separately.**
   build, which checks contracts, the call is linear; under `--turbo`, which strips them, it is
   logarithmic. A diagnostic that read only the algorithm's cost would understate every
   ordinary build; one that read only the checked build would overstate the shipping one.
+  **Measured** (2026-10-09, Debug, a busy machine; the ratio, not the milliseconds, is the
+  point): 1,000 searches over 100,000 sorted keys took **22,046 ms checked and 8.1 ms under
+  `--turbo`** -- about 2,700x, the order the arithmetic predicts (~17 comparisons per search
+  against a 100,000-element precondition walk).
 - The spectral test asserts Knuth's invariant U·Vᵀ = m·I after every reduction: O(t³) on top
   of a search that is far larger, so here the contract is cheap.
   `heapSort`'s `ensure isSorted(k)` is O(N) on an O(N log N) algorithm, also cheap.
