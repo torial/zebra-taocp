@@ -1,0 +1,12 @@
+# The checks too slow for an ordinary debug run (minutes each). Run them optimised:
+#     zebra --release taocp_heavy_test.zbr
+# Every expected value comes from OUTSIDE this repository, as in taocp_test.zbr.
+use taocp exposing pentominoBox
+
+def main()
+    # Vol. 4B 7.2.2.1, the twelve pentominoes. The 6 x 10 box has 2339 solutions up to
+    # symmetry (C. B. and Jenifer Haselgrove, 1960), counted directly with the X pentomino's
+    # centre held to the top-left quarter. The 4 x 15 box has 368, counted as all solutions / 4
+    # (no solution can be symmetric: twelve different pieces cannot each map onto themselves).
+    print("pentominoes 6x10: ${pentominoBox(6, 10, true).solutions(0).count()}")       # 2339
+    print("pentominoes 4x15: ${pentominoBox(4, 15, false).solutions(0).count() / 4}")  # 368

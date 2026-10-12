@@ -1,6 +1,6 @@
 # Every expected value below comes from OUTSIDE this repository: Knuth's published test
 # output, the book's worked examples, or a closed-form count. None was recorded from a run.
-use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128, combinations, mpDivide
+use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128, combinations, mpDivide, minstdNext, isProbablePrime, partitions, setPartitions, nestedParentheses, langford, pentominoShapes, orientations, pentominoBox, topologicalSort, AvlTree
 
 def countPermutations(start: List(int)): int
     var a = start.copy()
@@ -385,3 +385,341 @@ def main()
         if mpCompare(back, u) == 0 and mpCompare(res[1], v) < 0
             big_ok += 1
     print("division: ${d_ok}/3000 vs int128 (${d_addbacks} add-backs), ${big_ok}/300 by u = qv + r")
+    batch2()
+    batchAvl()
+
+# -- Batch 2 (2026-10-12): oracles from outside the repository, as above ---------------------
+
+# Lexicographic comparison of two int lists: -1, 0, 1.
+def lexCompare(x: List(int), y: List(int)): int
+    var n: int = x.count()
+    if y.count() < n
+        n = y.count()
+    for i in 0 : n
+        if x[i] < y[i]
+            return -1
+        if x[i] > y[i]
+            return 1
+    if x.count() < y.count()
+        return -1
+    if x.count() > y.count()
+        return 1
+    return 0
+
+# Sieve of Eratosthenes: the number of primes below n. The independent witness for
+# Algorithm P's answers, by a method that shares nothing with it.
+def sieveCount(n: int): int
+    var composite = List(bool)()
+    for i in 0 : n
+        composite.add(false)
+    var count: int = 0
+    for i in 2 : n
+        if not composite[i]
+            count += 1
+            var j: int = i * i
+            while j < n
+                composite[j] = true
+                j += i
+    return count
+
+# A topological sort's output is valid if it lists every object once and every relation
+# j < k has j before k.
+def isTopologicalOrder(n: int, pairs: List(int), order: List(int)): bool
+    if order.count() != n
+        return false
+    var pos = List(int)()
+    for i in 0 : n + 1
+        pos.add(-1)
+    for i in 0 : order.count()
+        if pos[order[i]] >= 0
+            return false
+        pos[order[i]] = i
+    for r in 0 : pairs.count() / 2
+        if pos[pairs[2 * r]] > pos[pairs[2 * r + 1]]
+            return false
+    return true
+
+# Decode a Langford exact-cover solution back into the sequence and check it directly: each
+# value v appears exactly twice, with exactly v numbers between the two copies.
+def langfordValid(n: int, ec: ExactCover, sol: List(int)): bool
+    var seq = List(int)()
+    for i in 0 : 2 * n
+        seq.add(0)
+    # option numbers follow langford()'s construction order: value v, slot i
+    var opt: int = 0
+    var chosen = List(bool)()
+    for o in 0 : ec.options
+        chosen.add(false)
+    for o in sol
+        chosen[o] = true
+    for v in 1 : n + 1
+        for i in 1 : 2 * n - v
+            if chosen[opt]
+                if seq[i - 1] != 0 or seq[i + v] != 0
+                    return false
+                seq[i - 1] = v
+                seq[i + v] = v
+            opt += 1
+    for v in 1 : n + 1
+        var first: int = -1
+        var last: int = -1
+        for i in 0 : 2 * n
+            if seq[i] == v
+                if first < 0
+                    first = i
+                last = i
+        if first < 0 or last - first != v + 1
+            return false
+    return true
+
+def batch2()
+    # Vol. 2 3.2.1.1: the minimal standard, X_0 = 1. Park and Miller's published check value:
+    # X_10000 = 1043618065. Schrage's method must also agree with the direct product (which
+    # fits in 64 bits) at every one of the 10000 steps.
+    var xm: int = 1
+    var schrage_bad: int = 0
+    for i in 0 : 10000
+        var direct: int = (16807 * xm) % 2147483647
+        xm = minstdNext(xm)
+        if xm != direct
+            schrage_bad += 1
+    print("minstd: X_10000 = ${xm}, Schrage vs direct: ${schrage_bad} disagreements")   # 1043618065, 0
+
+    # Vol. 2 4.5.4, Algorithm P. pi(10^5) = 9592, and the sieve must agree number by number
+    # in total. Bases 2, 3, 5, 7 are deterministic below 3215031751.
+    var mr_count: int = 0
+    for n in 0 : 100000
+        if isProbablePrime(n, [2, 3, 5, 7])
+            mr_count += 1
+    print("primes below 10^5: Miller-Rabin ${mr_count}, sieve ${sieveCount(100000)}")    # 9592, 9592
+    # Strong pseudoprimes, where the test is SUPPOSED to be fooled: 2047 = 23 * 89 is the
+    # smallest to base 2; 3215031751 = 151 * 751 * 28351 the smallest to bases 2, 3, 5, 7.
+    # One more base exposes each. Carmichael 561 does not fool the strong test even to base 2.
+    print("pseudoprimes: ${isProbablePrime(2047, [2])} ${isProbablePrime(2047, [2, 3])} ${isProbablePrime(3215031751, [2, 3, 5, 7])} ${isProbablePrime(3215031751, [2, 3, 5, 7, 11])} ${isProbablePrime(561, [2])}")   # true false true false false
+    # Mersenne numbers: 2^31 - 1 and 2^61 - 1 are prime; 2^59 - 1 = 179951 * 3203431780337 is
+    # not. 2^61 - 1 needs the 128-bit products.
+    var mbases = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
+    print("mersenne: ${isProbablePrime(2147483647, mbases)} ${isProbablePrime(2305843009213693951, mbases)} ${isProbablePrime(576460752303423487, mbases)}")   # true true false
+
+    # Vol. 4A 7.2.1.4, Algorithm P against the partition numbers p(n), OEIS A000041. Each
+    # visit must sum to n with nonincreasing parts, in strictly decreasing lexicographic order.
+    var pcounts = List(int)()
+    var p_bad: int = 0
+    for n in 1 : 21
+        var ps = partitions(n)
+        pcounts.add(ps.count())
+        for i in 0 : ps.count()
+            var sum: int = 0
+            for k in 0 : ps[i].count()
+                sum += ps[i][k]
+                if k > 0 and ps[i][k] > ps[i][k - 1]
+                    p_bad += 1
+            if sum != n
+                p_bad += 1
+            if i > 0 and lexCompare(ps[i - 1], ps[i]) <= 0
+                p_bad += 1
+    print("partitions: ${pcounts}, p(30) = ${partitions(30).count()}, ${p_bad} malformed")
+    # [1, 2, 3, 5, 7, 11, 15, 22, 30, 42, 56, 77, 101, 135, 176, 231, 297, 385, 490, 627], p(30) = 5604, 0 malformed
+
+    # Vol. 4A 7.2.1.5, Algorithm H against the Bell numbers (OEIS A000110), with every string a
+    # restricted growth string, in strictly increasing order -- and the blocks of n = 5 against
+    # the Stirling numbers of the second kind, S(5, 1..5) = 1, 15, 25, 10, 1.
+    var bells = List(int)()
+    var h_bad: int = 0
+    for n in 1 : 10
+        var rs = setPartitions(n)
+        bells.add(rs.count())
+        for i in 0 : rs.count()
+            var mx: int = -1
+            for k in 0 : n
+                if rs[i][k] > mx + 1
+                    h_bad += 1
+                if rs[i][k] > mx
+                    mx = rs[i][k]
+            if i > 0 and lexCompare(rs[i - 1], rs[i]) >= 0
+                h_bad += 1
+    var stirling = [0, 0, 0, 0, 0]
+    for r in setPartitions(5)
+        var mx: int = 0
+        for v in r
+            if v > mx
+                mx = v
+        # BUG-562 (zebra-language): `stirling[mx] += 1` on a literal-bound list is emitted
+        # `var` and zig refuses it; set() is the path BUG-495 fixed.
+        stirling.set(mx, stirling[mx] + 1)
+    print("set partitions: ${bells}, S(5,k) = ${stirling}, ${h_bad} malformed")
+    # [1, 2, 5, 15, 52, 203, 877, 4140, 21147], S(5,k) = [1, 15, 25, 10, 1], 0 malformed
+
+    # Vol. 4A 7.2.1.6, Algorithm P against the Catalan numbers (OEIS A000108). Every string
+    # balanced; the visits strictly monotone in one direction (which one is printed, not
+    # assumed); n = 3 begins at ()()() and ends at ((())).
+    var cats = List(int)()
+    var paren_bad: int = 0
+    var ups: int = 0
+    var downs: int = 0
+    for n in 1 : 11
+        var ss = nestedParentheses(n)
+        cats.add(ss.count())
+        for i in 0 : ss.count()
+            var depth: int = 0
+            for ch in ss[i]
+                if ch == 0
+                    depth += 1
+                else
+                    depth -= 1
+                if depth < 0
+                    paren_bad += 1
+            if depth != 0
+                paren_bad += 1
+            if i > 0
+                var c: int = lexCompare(ss[i - 1], ss[i])
+                if c < 0
+                    ups += 1
+                else if c > 0
+                    downs += 1
+                else
+                    paren_bad += 1
+    var p3 = nestedParentheses(3)
+    var first3: str = ""
+    var last3: str = ""
+    for ch in p3[0]
+        first3 = first3 + if(ch == 0, "(", ")")
+    for ch in p3[p3.count() - 1]
+        last3 = last3 + if(ch == 0, "(", ")")
+    print("parentheses: ${cats}, ${paren_bad} malformed, ${ups} up / ${downs} down, n=3: ${first3} .. ${last3}")
+    # [1, 2, 5, 14, 42, 132, 429, 1430, 4862, 16796], 0 malformed, all steps one way, ()()() .. ((()))
+
+    # Vol. 4B 7.2.2.1, Langford pairs: twice OEIS A014552 (1, 1, 26, 150 for n = 3, 4, 7, 8;
+    # none for n = 1, 2, 5, 6), every solution decoded and checked as a sequence.
+    var lang = List(int)()
+    var lang_bad: int = 0
+    for n in 1 : 9
+        var ec = langford(n)
+        var sols = ec.solutions(0)
+        lang.add(sols.count())
+        for sol in sols
+            if not langfordValid(n, ec, sol)
+                lang_bad += 1
+    print("langford: ${lang}, ${lang_bad} invalid")       # [0, 0, 2, 2, 0, 0, 52, 300], 0 invalid
+
+    # Vol. 4B 7.2.2.1, pentominoes. The twelve shapes have 63 fixed orientations in all
+    # (OEIS A000988(5)): F L N P Y have 8, T U V W Z 4, I 2, X 1.
+    var orients = List(int)()
+    var total_orients: int = 0
+    for sh in pentominoShapes()
+        var k: int = orientations(sh).count()
+        orients.add(k)
+        total_orients += k
+    print("pentomino orientations: ${orients} = ${total_orients}")
+    # [8, 2, 8, 8, 8, 4, 4, 4, 4, 1, 8, 4] = 63
+    # 3 x 20 has 2 solutions up to symmetry, counted as all solutions / 4 (no solution can be
+    # symmetric: twelve DIFFERENT pieces cannot each map onto themselves). The 6 x 10 (2339)
+    # and 4 x 15 (368) boxes take minutes in a debug build: taocp_heavy_test.zbr.
+    print("pentominoes 3x20: ${pentominoBox(3, 20, false).solutions(0).count() / 4}")   # 2
+
+    # Vol. 1 2.2.3, Algorithm T on Knuth's example relations (18): 9<2 3<7 7<5 5<8 8<6 4<6 1<3
+    # 7<4 9<5 2<8 on objects 1..9. Valid order expected; adding 6<3 closes the loop
+    # 3<7<4<6<3, and the output must come up SHORT.
+    var rel = [9, 2, 3, 7, 7, 5, 5, 8, 8, 6, 4, 6, 1, 3, 7, 4, 9, 5, 2, 8]
+    var order = topologicalSort(9, rel)
+    var looped = rel.copy()
+    looped.add(6)
+    looped.add(3)
+    var short = topologicalSort(9, looped)
+    # 200 random DAGs: relations drawn consistent with a random ranking of 20 objects.
+    var tg = RanArray(141421)
+    var topo_ok: int = 0
+    for trial in 0 : 200
+        var rank = List(int)()               # a random permutation of 1..20 (Algorithm P, 3.4.2)
+        for i in 0 : 20
+            rank.add(i + 1)
+        var jj: int = 19
+        while jj > 0
+            var kk: int = tg.next() % (jj + 1)
+            var tmp: int = rank[jj]
+            rank[jj] = rank[kk]
+            rank[kk] = tmp
+            jj -= 1
+        var prs = List(int)()
+        for e in 0 : 40
+            var u: int = tg.next() % 20
+            var w: int = tg.next() % 20
+            if u < w
+                prs.add(rank[u])
+                prs.add(rank[w])
+        if isTopologicalOrder(20, prs, topologicalSort(20, prs))
+            topo_ok += 1
+    print("topological sort: ${isTopologicalOrder(9, rel, order)}, with a loop ${short.count()} < 9, random DAGs ${topo_ok}/200")
+    # true, with a loop (fewer than 9), 200/200
+
+# The height of the subtree at p, recomputed from the links alone (no balance factors), and
+# the number of nodes whose stored B(P) disagrees with height(right) - height(left).
+def avlHeight(t: AvlTree, p: int): int
+    if p < 0
+        return 0
+    var hl: int = avlHeight(t, t.llink[p])
+    var hr: int = avlHeight(t, t.rlink[p])
+    return 1 + if(hl > hr, hl, hr)
+
+def avlBadBalance(t: AvlTree, p: int): int
+    if p < 0
+        return 0
+    var bad: int = avlBadBalance(t, t.llink[p]) + avlBadBalance(t, t.rlink[p])
+    var b: int = avlHeight(t, t.rlink[p]) - avlHeight(t, t.llink[p])
+    if b != t.bal[p] or b < -1 or b > 1
+        bad += 1
+    return bad
+
+def batchAvl()
+    # Vol. 3 6.2.3, Algorithm A. 2000 random keys in 0..4999 (duplicates rejected): the
+    # symmetric order must be the sorted distinct keys; every stored balance factor must equal
+    # the recomputed height difference and lie in -1..1; the stored height (LLINK(HEAD)) must
+    # equal the recomputed one; and Theorem A (Adelson-Velsky and Landis), in its exact form:
+    # a balanced tree of height h has at least F(h+2) - 1 nodes.
+    var g = RanArray(173205)
+    var t = AvlTree()
+    var seen = List(bool)()
+    for i in 0 : 5000
+        seen.add(false)
+    var dup_ok: int = 0
+    var inserted: int = 0
+    for i in 0 : 2000
+        var k: int = g.next() % 5000
+        var fresh: bool = t.insert(k)
+        if fresh != seen[k]
+            dup_ok += 1
+        if fresh
+            inserted += 1
+        seen[k] = true
+    var expect = List(int)()
+    for k in 0 : 5000
+        if seen[k]
+            expect.add(k)
+    var h: int = avlHeight(t, t.rlink[0])
+    var fa: int = 0                         # F(h + 2) by iteration
+    var fb: int = 1
+    for i in 0 : h + 2
+        var fc: int = fa + fb
+        fa = fb
+        fb = fc
+    print("AVL: in order ${t.inorder() == expect}, ${avlBadBalance(t, t.rlink[0])} bad balance factors, height ${t.height()} (recomputed ${h}), ${t.size} nodes >= F(h+2) - 1 = ${fa - 1}: ${t.size >= fa - 1}, insert() agreed on ${dup_ok}/2000")
+    # in order true, 0 bad balance factors, height H (recomputed H), N nodes >= ...: true, 2000/2000
+
+    # Inserting 1, 2, ..., 2^k - 1 in increasing order leaves a PERFECT tree of height k --
+    # every rotation on the way is a single one, and every balance factor ends at 0.
+    var perfect: int = 0
+    for k in 1 : 11
+        var tk = AvlTree()
+        for v in 1 : (1 << k)
+            tk.insert(v)
+        var zeros: bool = true
+        for p in 1 : tk.bal.count()
+            if tk.bal[p] != 0
+                zeros = false
+        if tk.height() == k and avlHeight(tk, tk.rlink[0]) == k and zeros
+            perfect += 1
+    var miss: int = 0
+    for k in 0 : 5000
+        if t.contains(k) != seen[k]
+            miss += 1
+    print("AVL: perfect after sequential insertion ${perfect}/10, contains() wrong for ${miss} of 5000")   # 10/10, 0

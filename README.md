@@ -5,7 +5,8 @@ Algorithms from D. E. Knuth, *The Art of Computer Programming*, written in
 outside this repository.
 
 ```bash
-zebra taocp_test.zbr
+zebra taocp_test.zbr                      # the everyday suite, under a minute
+zebra --release taocp_heavy_test.zbr      # the two large pentomino boxes, a few minutes
 ```
 
 ## Why these, and why checked this way
@@ -39,12 +40,37 @@ contract (`require` / `ensure` / `invariant`): checked in an ordinary build, rem
 | `nextPermutation` — Algorithm L | Vol. 4A §7.2.1.2 | 4! = 24; multinomials 4!/(2!2!) = 6 and 6!/(1!2!3!) = 60 |
 | `ExactCover` — Algorithm X, dancing links; `queens(n)` | Vol. 4B §7.2.2.1 | Knuth's example (5) and its single solution; n-queens counts for n = 1..8 (OEIS A000170) |
 | `ExactCover.addColoredOption` — Algorithm C, color controls | Vol. 4B §7.2.2.1 | Knuth's colored example and its single solution; 50 generated problems against exhaustive search over every subset of options (50/50, 235 solutions) |
+| `topologicalSort` — Algorithm T | Vol. 1 §2.2.3 | Knuth's example relations (18): a valid order; adding 6 ≺ 3 closes a loop and the output comes up short; 200 random DAGs (200/200) |
+| `minstdNext` — the "minimal standard" X ← 16807X mod (2³¹ − 1), by Schrage's method | Vol. 2 §3.2.1.1, §3.6 | Park and Miller's check value X₁₀₀₀₀ = 1043618065 from X₀ = 1; agrees with the direct product at all 10,000 steps |
+| `isProbablePrime` — Algorithm P, the strong probable-prime test (Miller–Rabin), 128-bit | Vol. 2 §4.5.4 | π(10⁵) = 9592, and a sieve agrees; fooled exactly where it should be: 2047 (base 2) and 3215031751 (bases 2, 3, 5, 7), each exposed by one more base; 2³¹ − 1 and 2⁶¹ − 1 prime, 2⁵⁹ − 1 not |
+| `AvlTree` — Algorithm A, balanced tree insertion | Vol. 3 §6.2.3 | 2,000 random insertions: symmetric order = the sorted distinct keys, every balance factor equals the recomputed height difference, Theorem A in its exact form N ≥ F(h+2) − 1; 1..2ᵏ−1 inserted in order give a perfect tree of height k (k = 1..10) |
+| `partitions` — Algorithm P, partitions in reverse lexicographic order | Vol. 4A §7.2.1.4 | p(n) for n = 1..20 and p(30) = 5604 (OEIS A000041); every visit sums to n, parts nonincreasing, order strictly decreasing |
+| `setPartitions` — Algorithm H, restricted growth strings | Vol. 4A §7.2.1.5 | the Bell numbers for n = 1..9 (OEIS A000110); S(5, k) = 1, 15, 25, 10, 1 (Stirling numbers of the second kind); every string a restricted growth string, order strictly increasing |
+| `nestedParentheses` — Algorithm P | Vol. 4A §7.2.1.6 | the Catalan numbers for n = 1..10 (OEIS A000108); every string balanced; the order strictly monotone |
+| `langford` — Langford pairs as exact cover | Vol. 4B §7.2.2.1 | twice OEIS A014552 for n = 1..8 (each sequence and its reversal), every solution decoded and checked as a sequence |
+| `pentominoBox` — the twelve pentominoes as exact cover | Vol. 4B §7.2.2.1 | 63 fixed orientations; 3 × 20 has 2 solutions; and in `taocp_heavy_test.zbr`, 6 × 10 has 2339 (Haselgrove, 1960) and 4 × 15 has 368 |
 
 Every check has also been seen to FAIL: a one-line mutation of the generator's lag, of
 heapsort's step H6, of quicksort's step Q4, of the Gray-code output, of Algorithm C's purify
 (12/50), of Algorithm D's step D6 (exactly the 11 add-back cases fail) and of the
 combinations' visit (0/55) each turns the corresponding line (or contract) red. A check
 never seen red is not evidence.
+
+The second batch (2026-10-12) was held to the same rule, one mutant per algorithm, each run on
+a copy of the repository (11 in all, every one killed). Where it could be, the mutant is a
+mistake someone would make rather than an arbitrary edit: Schrage's r off by one (X₁₀₀₀₀
+becomes 590018985 and 9998 steps disagree); Miller–Rabin forgetting the −1 exit (300 primes
+below 10⁵); Algorithm H never raising m (the Bell column becomes powers of two); Algorithm P
+of §7.2.1.6 resetting m to k -- the first draft's own misreading -- (1372 malformed strings);
+a Langford copy one slot too close; one of the eight motions lost (58 orientations); Algorithm
+T forgetting to count a relation (the example fails, 1/200 random DAGs pass); a wrong balance
+factor in step A9 (102 bad nodes). Two observations from it. Mutants of the partition
+algorithm's bookkeeping did not reach the check at all: they ran off the end of the array and
+Zebra's bounds check stopped the run, so a visit-level mutant was added (dropping the last
+part), which the check catches with the counts still RIGHT -- 3339 malformed partitions,
+p(n) unchanged. The per-visit checks are what see it; the count alone would have passed. And
+the first Algorithm T mutant hung rather than answering, which is detection by timeout; its
+replacement is caught by the check itself.
 
 ## Notes for a maintainer
 
@@ -65,6 +91,25 @@ never seen red is not evidence.
   O(N) check on an O(log N) search: an ordinary build is linear there, a `--turbo` build
   logarithmic. Kept deliberately — a binary search over unsorted keys answers confidently
   and wrongly — and recorded because a complexity annotation would have to account for it.
+- **Algorithm P of §7.2.1.6 assumes n ≥ 2.** With one pair, step P3's easy-case test reads
+  the sentinel a₀ = ')' as a right parenthesis and walks off the front of the array; the test
+  found it (a hand trace at n = 2 could not), and n = 1 is answered directly. Step P5 resets
+  m to 2n − 1, where step P4 left the last left parenthesis -- the first version set m to the
+  loop's final k, which breaks the invariant at n = 3; the mutant that restores it is in the
+  set below.
+- **The X pentomino counts each 6 × 10 solution once.** X is symmetric under all eight
+  motions, so holding its centre to rows 0–2 and columns 0–4 picks one of the four images of
+  every solution under the box's symmetries; the box has no centre row or column, so no
+  solution is its own image. The 3 × 20 and 4 × 15 counts instead divide all solutions by 4,
+  which is exact because twelve different pieces cannot each map onto themselves.
+- **Two workarounds for zebra-language bugs, each marked where it sits:** `pentominoShapes`
+  builds its table a row at a time because a list literal cannot span lines (BUG-561), and the
+  Stirling tally in the test uses `set()` because a subscript write on a literal-bound list is
+  emitted `var` and zig refuses it (BUG-562). Remove the workaround and rerun once the bug is
+  fixed -- that is the test of the fix.
+- **The heavy suite is separate because it is slow in a debug build:** measured 2026-10-12 on
+  a shared machine, 6 × 10 took 160 s in debug, 64 s with `--release` and 35 s with
+  `--release --turbo` (each including compilation); 4 × 15 took 224 s in debug.
 - **Requires zebra-language 0ad017b or later:** quicksort's stack uses `List.pop()`, which
   throws on an empty list (BUG-545, fixed there); the stack is checked non-empty first.
 

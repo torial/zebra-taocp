@@ -993,3 +993,562 @@ def mpDivide(u: List(int), v: List(int), b: int): List(List(int))
         k -= 1
     assert rem == 0, "the normalised remainder is a multiple of d"
     return [q, r, [addbacks]]
+
+# -- Vol. 2 3.2.1.1 / 3.6: the "minimal standard" generator, by Schrage's method --------------
+# X_{n+1} = 16807 X_n mod (2^31 - 1), Lehmer's multiplicative generator as Park and Miller
+# proposed it. Schrage's method (Knuth, 3.2.1.1, the approximate factorisation m = a q + r with
+# r < q): a x mod m = a (x mod q) - r floor(x / q), plus m if that is negative -- every
+# intermediate stays below m, so the step needs no double-width product. Knuth discusses the
+# multiplier in 3.6 (and recommends 48271 over 16807).
+const MINSTD_M = 2147483647              # 2^31 - 1, prime
+const MINSTD_A = 16807                   # 7^5
+const MINSTD_Q = 127773                  # m div a
+const MINSTD_R = 2836                    # m mod a; r < q, which is what makes the method exact
+
+def minstdNext(x: int): int
+    require
+        x > 0
+        x < MINSTD_M
+    ensure
+        result > 0
+        result < MINSTD_M
+    var t: int = MINSTD_A * (x % MINSTD_Q) - MINSTD_R * (x / MINSTD_Q)
+    if t < 0
+        t += MINSTD_M
+    return t
+
+# -- Vol. 2 4.5.4: Algorithm P, the strong probable-prime test (Miller-Rabin) ----------------
+# For odd n > 2 write n - 1 = 2^k q with q odd. n passes for the base x if x^q = 1, or
+# x^(2^j q) = -1 for some 0 <= j < k (mod n); a prime passes for every base, and an odd
+# composite for at most a quarter of them. Knuth's test draws x at random; here the bases are
+# given, which makes the answer deterministic and lets a test choose bases that FAIL to catch
+# a composite on purpose. 128-bit arithmetic: n may be close to 2^63, so a product of two
+# residues needs 126 bits.
+def mulMod128(a: int128, b: int128, m: int128): int128
+    require
+        m > 0
+    return (a * b) % m
+
+def powMod128(x: int128, e: int128, m: int128): int128
+    require
+        e >= 0
+        m >= 1
+    var y: int128 = 1 % m                   # Algorithm A of 4.6.3, as powMod above
+    var z: int128 = ((x % m) + m) % m
+    var nn: int128 = e
+    while nn > 0
+        if nn % 2 == 1
+            y = mulMod128(y, z, m)
+        nn = nn / 2
+        if nn > 0
+            z = mulMod128(z, z, m)
+    return y
+
+# One base x, 1 < x < n - 1: true if n is a strong probable prime to base x.
+def strongProbablePrime(n: int128, x: int128): bool
+    require
+        n > 3
+        n % 2 == 1
+        x > 1
+        x < n - 1
+    var q: int128 = n - 1
+    var k: int = 0
+    while q % 2 == 0
+        q = q / 2
+        k += 1
+    var j: int = 0                          # P2. [Power x.]
+    var y: int128 = powMod128(x, q, n)
+    while true
+        if (j == 0 and y == 1) or y == n - 1    # P3. [Done?]
+            return true
+        if j > 0 and y == 1
+            return false                    # P5: 1 reached without passing through -1
+        j += 1                              # P4. [Increase j.]
+        if j >= k
+            return false                    # P5. [Not prime.]
+        y = mulMod128(y, y, n)
+
+# n prime or a strong probable prime to every listed base. A base that is 0, 1 or -1 mod n
+# says nothing and is skipped.
+def isProbablePrime(n: int, bases: List(int)): bool
+    if n < 2
+        return false
+    if n < 4
+        return true
+    if n % 2 == 0
+        return false
+    var nn: int128 = n
+    for b in bases
+        var x: int128 = b
+        x = x % nn
+        if x > 1 and x < nn - 1
+            if not strongProbablePrime(nn, x)
+                return false
+    return true
+
+# -- Vol. 4A 7.2.1.4: Algorithm P, partitions of n in reverse lexicographic order ------------
+# Each partition as its parts a_1 >= a_2 >= ... >= a_m. a_0 = 0 is Knuth's sentinel: step P5
+# reaches q = 0 only after the last partition, 1 + 1 + ... + 1.
+def partitions(n: int): List(List(int))
+    require
+        n >= 1
+    var out: List(List(int)) = List(List(int))()
+    var a = List(int)()
+    for i in 0 : n + 2
+        a.add(0)
+    var rest: int = n                       # Knuth's n, reused for what is left to place
+    var m: int = 1                          # P1. [Initialize.] (a_0 = 0 already)
+    var q: int = 0
+    var x: int = 0
+    var step: int = 2
+    while true
+        if step == 2                        # P2. [Store final part.]
+            a[m] = rest
+            q = m
+            if rest == 1
+                q -= 1
+            step = 3
+        else if step == 3                   # P3. [Visit.]
+            var part = List(int)()
+            for i in 1 : m + 1
+                part.add(a[i])
+            out.add(part)
+            if a[q] == 2
+                step = 4
+            else
+                step = 5
+        else if step == 4                   # P4. [Change 2 to 1 + 1.]
+            a[q] = 1
+            q -= 1
+            m += 1
+            a[m] = 1
+            step = 3
+        else if step == 5                   # P5. [Decrease a_q.]
+            if q == 0
+                break
+            x = a[q] - 1
+            a[q] = x
+            rest = m - q + 1
+            m = q + 1
+            step = 6
+        else                                # P6. [Copy x if necessary.]
+            if rest <= x
+                step = 2
+            else
+                a[m] = x
+                m += 1
+                rest -= x
+    return out
+
+# -- Vol. 4A 7.2.1.5: Algorithm H, set partitions as restricted growth strings --------------
+# A partition of {1..n} into blocks is the string a_1 ... a_n with a_1 = 0 and
+# a_j <= 1 + max(a_1, ..., a_{j-1}) -- element j goes in block a_j. Visited in lexicographic
+# order. b_j = 1 + max(a_1, ..., a_{j-1}), and m = b_n.
+def setPartitions(n: int): List(List(int))
+    require
+        n >= 1
+    var out: List(List(int)) = List(List(int))()
+    if n == 1
+        out.add([0])
+        return out
+    var a = List(int)()                     # a_1 .. a_n at a[1] .. a[n]
+    var b = List(int)()                     # b_1 .. b_{n-1} at b[1] .. b[n-1]
+    for i in 0 : n + 1                      # H1. [Initialize.]
+        a.add(0)
+        b.add(1)
+    var m: int = 1
+    var j: int = 0
+    var step: int = 2
+    while true
+        if step == 2                        # H2. [Visit.]
+            var rgs = List(int)()
+            for i in 1 : n + 1
+                rgs.add(a[i])
+            out.add(rgs)
+            if a[n] == m
+                step = 4
+            else
+                step = 3
+        else if step == 3                   # H3. [Increase a_n.]
+            a[n] += 1
+            step = 2
+        else if step == 4                   # H4. [Find j.] (a_1 = 0 < b_1 = 1 stops it)
+            j = n - 1
+            while a[j] == b[j]
+                j -= 1
+            step = 5
+        else if step == 5                   # H5. [Increase a_j.]
+            if j == 1
+                break
+            a[j] += 1
+            step = 6
+        else                                # H6. [Zero out a_{j+1} .. a_n.]
+            m = b[j]
+            if a[j] == b[j]
+                m += 1
+            j += 1
+            while j < n
+                a[j] = 0
+                b[j] = m
+                j += 1
+            a[n] = 0
+            step = 2
+    return out
+
+# -- Vol. 4A 7.2.1.6: Algorithm P, nested parentheses -------------------------------------
+# Every string of n pairs of balanced parentheses, as 0 = '(' and 1 = ')', visited from
+# ()()...() to ((...)): each visit is lexicographically SMALLER than the one before when
+# '(' < ')' (measured by the test: 23703 steps, every one downward, n = 1..10). a_0 = ')' is Knuth's sentinel, and at
+# step P2 a_m = '(' with every a_k = ')' for m < k <= 2n -- so step P5 resets m to 2n - 1,
+# where step P4 put the last left parenthesis.
+const PAREN_L = 0
+const PAREN_R = 1
+
+def nestedParentheses(n: int): List(List(int))
+    require
+        n >= 1
+    var out: List(List(int)) = List(List(int))()
+    # Knuth's Algorithm P assumes n >= 2: with one pair, step P3's easy-case test reads the
+    # sentinel a_0 = ')' as a right parenthesis and steps off the front of the array (the
+    # test found this; the n = 2 hand trace could not). One pair has one string.
+    if n == 1
+        out.add([PAREN_L, PAREN_R])
+        return out
+    var a = List(int)()
+    a.add(PAREN_R)                          # a_0, the sentinel
+    for k in 1 : n + 1                      # P1. [Initialize.] ()()...()
+        a.add(PAREN_L)
+        a.add(PAREN_R)
+    var m: int = 2 * n - 1
+    while true
+        var s = List(int)()                 # P2. [Visit.]
+        for i in 1 : 2 * n + 1
+            s.add(a[i])
+        out.add(s)
+        a[m] = PAREN_R                      # P3. [Easy case?]
+        if a[m - 1] == PAREN_R
+            a[m - 1] = PAREN_L
+            m -= 1
+            continue
+        var j: int = m - 1                  # P4. [Find j.]
+        var k: int = 2 * n - 1
+        while a[j] == PAREN_L
+            a[j] = PAREN_R
+            a[k] = PAREN_L
+            j -= 1
+            k -= 2
+        if j == 0                           # P5. [Increase a_j.]
+            break
+        a[j] = PAREN_L
+        m = 2 * n - 1
+    return out
+
+# -- Vol. 4B 7.2.2.1: Langford pairs as exact cover ---------------------------------------
+# Place two copies of each of 1..n in 2n slots so the copies of k have exactly k numbers
+# between them. Items 1..n are the values, n+1..3n the slots; the option for value v at
+# slot i (1-based) is {v, slot i, slot i + v + 1}. Every arrangement and its reversal are
+# both found (no Langford sequence is its own reversal), so the count is twice OEIS A014552.
+def langford(n: int): ExactCover
+    require
+        n >= 1
+    var ec = ExactCover(3 * n, 0)
+    for v in 1 : n + 1
+        for i in 1 : 2 * n - v
+            ec.addOption([v, n + i, n + i + v + 1])
+    return ec
+
+# -- Vol. 4B 7.2.2.1: the twelve pentominoes in a 6 x 10 box, as exact cover -------------
+# Items 1..12 are the pieces (F I L N P T U V W X Y Z), 13..72 the cells. Each piece in each
+# of its distinct orientations at each position in the box is one option. The X pentomino is
+# symmetric under all eight motions, so restricting its centre to the top-left quarter of the
+# box (rows 0-2, columns 0-4: the box has no centre row or column) counts each solution
+# exactly once up to the box's four symmetries.
+def pentominoShapes(): List(List(int))
+    # each shape as row, col, row, col, ... (five cells), in the order F I L N P T U V W X Y Z.
+    # BUG-561 (zebra-language): a list literal cannot span lines, so the table is built a row
+    # at a time; restore the single nested literal once brackets continue a line.
+    var s: List(List(int)) = List(List(int))()
+    s.add([0, 1, 0, 2, 1, 0, 1, 1, 2, 1])           # F
+    s.add([0, 0, 1, 0, 2, 0, 3, 0, 4, 0])           # I
+    s.add([0, 0, 1, 0, 2, 0, 3, 0, 3, 1])           # L
+    s.add([0, 0, 1, 0, 1, 1, 2, 1, 3, 1])           # N
+    s.add([0, 0, 0, 1, 1, 0, 1, 1, 2, 0])           # P
+    s.add([0, 0, 0, 1, 0, 2, 1, 1, 2, 1])           # T
+    s.add([0, 0, 0, 2, 1, 0, 1, 1, 1, 2])           # U
+    s.add([0, 0, 1, 0, 2, 0, 2, 1, 2, 2])           # V
+    s.add([0, 0, 1, 0, 1, 1, 2, 1, 2, 2])           # W
+    s.add([0, 1, 1, 0, 1, 1, 1, 2, 2, 1])           # X
+    s.add([0, 0, 1, 0, 2, 0, 3, 0, 1, 1])           # Y
+    s.add([0, 0, 0, 1, 1, 1, 2, 1, 2, 2])           # Z
+    return s
+
+# A shape moved so its smallest row and column are 0, cells sorted: the canonical form two
+# orientations must share to be the same orientation.
+def normalizeCells(cells: List(int)): List(int)
+    var minr: int = cells[0]
+    var minc: int = cells[1]
+    for i in 0 : cells.count() / 2
+        if cells[2 * i] < minr
+            minr = cells[2 * i]
+        if cells[2 * i + 1] < minc
+            minc = cells[2 * i + 1]
+    var keys = List(int)()                  # row * 16 + col, sorted
+    for i in 0 : cells.count() / 2
+        keys.add((cells[2 * i] - minr) * 16 + (cells[2 * i + 1] - minc))
+    keys.sort()
+    var out = List(int)()
+    for kk in keys
+        out.add(kk / 16)
+        out.add(kk % 16)
+    return out
+
+# The distinct orientations of a shape under the eight motions of the square.
+def orientations(cells: List(int)): List(List(int))
+    var out: List(List(int)) = List(List(int))()
+    for t in 0 : 8
+        var img = List(int)()
+        for i in 0 : cells.count() / 2
+            var r: int = cells[2 * i]
+            var c: int = cells[2 * i + 1]
+            var rr: int = r
+            var cc: int = c
+            if t == 1
+                rr = c
+                cc = 0 - r
+            else if t == 2
+                rr = 0 - r
+                cc = 0 - c
+            else if t == 3
+                rr = 0 - c
+                cc = r
+            else if t == 4
+                rr = r
+                cc = 0 - c
+            else if t == 5
+                rr = 0 - r
+                cc = c
+            else if t == 6
+                rr = c
+                cc = r
+            else if t == 7
+                rr = 0 - c
+                cc = 0 - r
+            img.add(rr)
+            img.add(cc)
+        var norm = normalizeCells(img)
+        var seen: bool = false
+        for o in out
+            if o == norm
+                seen = true
+        if not seen
+            out.add(norm)
+    return out
+
+def pentominoBox(rows: int, cols: int, quarterX: bool): ExactCover
+    require
+        rows * cols == 60
+    var shapes = pentominoShapes()
+    var ec = ExactCover(12 + rows * cols, 0)
+    for p in 0 : 12
+        for o in orientations(shapes[p])
+            var h: int = 0
+            var w: int = 0
+            for i in 0 : 5
+                if o[2 * i] > h
+                    h = o[2 * i]
+                if o[2 * i + 1] > w
+                    w = o[2 * i + 1]
+            for dr in 0 : rows - h
+                for dc in 0 : cols - w
+                    if quarterX and p == 9      # X: its centre is cell (1, 1) of the shape
+                        if dr + 1 > (rows - 1) / 2 or dc + 1 > (cols - 1) / 2
+                            continue
+                    var its = List(int)()
+                    its.add(p + 1)
+                    for i in 0 : 5
+                        its.add(13 + (o[2 * i] + dr) * cols + (o[2 * i + 1] + dc))
+                    ec.addOption(its)
+    return ec
+
+# -- Vol. 1 2.2.3: Algorithm T, topological sorting ---------------------------------------
+# Objects 1..n and relations j < k ("j precedes k"), given as pairs. The output lists the
+# objects so that j comes before k for every relation; if the relations contain a loop, the
+# output is SHORTER than n (Knuth's step T8: N > 0 at the end). COUNT[k] counts the
+# unfinished predecessors of k; TOP[j] heads the list of j's successors (SUC, NEXT); the
+# queue of objects with COUNT zero is linked through QLINK.
+def topologicalSort(n: int, pairs: List(int)): List(int)
+    require
+        n >= 1
+        pairs.count() % 2 == 0
+    var count = List(int)()
+    var top = List(int)()
+    var qlink = List(int)()
+    for k in 0 : n + 1                      # T1. [Initialize.]
+        count.add(0)
+        top.add(-1)
+        qlink.add(0)
+    var suc = List(int)()
+    var nxt = List(int)()
+    for r in 0 : pairs.count() / 2          # T2/T3. [Next relation.] [Record the relation.]
+        var j: int = pairs[2 * r]
+        var k: int = pairs[2 * r + 1]
+        assert j >= 1 and j <= n and k >= 1 and k <= n
+        count[k] += 1
+        suc.add(k)
+        nxt.add(top[j])
+        top[j] = suc.count() - 1
+    var rr: int = 0                         # T4. [Scan for zeros.]
+    for k in 1 : n + 1
+        if count[k] == 0
+            qlink[rr] = k
+            rr = k
+    var f: int = qlink[0]
+    var out = List(int)()
+    while f != 0                            # T5. [Output front of queue.]
+        out.add(f)
+        var p: int = top[f]
+        while p >= 0                        # T6. [Erase relations.]
+            var s: int = suc[p]
+            count[s] -= 1
+            if count[s] == 0
+                qlink[rr] = s
+                rr = s
+            p = nxt[p]
+        f = qlink[f]                        # T7. [Remove from queue.]
+    return out                              # T8. [End of process.]
+
+# -- Vol. 3 6.2.3: Algorithm A, balanced tree search and insertion (AVL) ------------------
+# Knuth's layout: node 0 is HEAD, whose RLINK is the root and whose LLINK holds the height of
+# the tree; -1 is LAMBDA. B(P) is the balance factor, height(right) - height(left), always
+# -1, 0 or +1. LINK(a, P) for a = -1 / +1 is LLINK / RLINK, which lets steps A6-A10 handle
+# the two mirror-image cases with one piece of code. S is the node where rebalancing may be
+# necessary (the last node on the search path with a nonzero balance factor), T its parent.
+class AvlTree
+    var key: List(int)
+    var llink: List(int)
+    var rlink: List(int)
+    var bal: List(int)
+    var size: int
+
+    cue init()
+        .key = [0]                          # HEAD
+        .llink = [0]                        # LLINK(HEAD): the height
+        .rlink = [-1]                       # RLINK(HEAD): the root
+        .bal = [0]
+        .size = 0
+
+    def link(a: int, p: int): int
+        if a < 0
+            return .llink[p]
+        return .rlink[p]
+
+    def setLink(a: int, p: int, v: int)
+        if a < 0
+            .llink[p] = v
+        else
+            .rlink[p] = v
+
+    def newNode(k: int): int
+        .key.add(k)                         # A5. [Insert.]
+        .llink.add(-1)
+        .rlink.add(-1)
+        .bal.add(0)
+        .size += 1
+        return .key.count() - 1
+
+    def height(): int
+        return .llink[0]
+
+    # Insert k; false if it was already present.
+    def insert(k: int): bool
+        if .rlink[0] < 0                    # an empty tree: the root is the new node
+            .rlink[0] = .newNode(k)
+            .llink[0] = 1
+            return true
+        var t: int = 0                      # A1. [Initialize.]
+        var s: int = .rlink[0]
+        var p: int = s
+        var q: int = -1
+        while true                          # A2. [Compare.]
+            if k == .key[p]
+                return false
+            var dir: int = if(k < .key[p], -1, 1)
+            q = .link(dir, p)               # A3 / A4. [Move left / right.]
+            if q < 0
+                q = .newNode(k)
+                .setLink(dir, p, q)
+                break
+            if .bal[q] != 0
+                t = p
+                s = q
+            p = q
+        var a: int = if(k < .key[s], -1, 1) # A6. [Adjust balance factors.]
+        var r: int = .link(a, s)
+        p = r
+        while p != q
+            if k < .key[p]
+                .bal[p] = -1
+                p = .llink[p]
+            else
+                .bal[p] = 1
+                p = .rlink[p]
+        if .bal[s] == 0                     # A7. [Balancing act.] (i) the tree got higher
+            .bal[s] = a
+            .llink[0] += 1
+            return true
+        if .bal[s] == 0 - a                 # (ii) the tree got more balanced
+            .bal[s] = 0
+            return true
+        if .bal[r] == a                     # (iii) out of balance: A8, single rotation
+            p = r
+            .setLink(a, s, .link(0 - a, r))
+            .setLink(0 - a, r, s)
+            .bal[s] = 0
+            .bal[r] = 0
+        else                                # A9. [Double rotation.]
+            p = .link(0 - a, r)
+            .setLink(0 - a, r, .link(a, p))
+            .setLink(a, p, r)
+            .setLink(a, s, .link(0 - a, p))
+            .setLink(0 - a, p, s)
+            if .bal[p] == a
+                .bal[s] = 0 - a
+                .bal[r] = 0
+            else if .bal[p] == 0
+                .bal[s] = 0
+                .bal[r] = 0
+            else
+                .bal[s] = 0
+                .bal[r] = a
+            .bal[p] = 0
+        if s == .rlink[t]                   # A10. [Finishing touch.]
+            .rlink[t] = p
+        else
+            .llink[t] = p
+        return true
+
+    def contains(k: int): bool
+        var p: int = .rlink[0]
+        while p >= 0
+            if k == .key[p]
+                return true
+            p = if(k < .key[p], .llink[p], .rlink[p])
+        return false
+
+    # The keys in symmetric (in-) order, iteratively with an explicit stack (Algorithm T of
+    # 2.3.1).
+    def inorder(): List(int)
+        var out = List(int)()
+        var stack = List(int)()
+        var p: int = .rlink[0]
+        while true
+            if p >= 0                       # T3. [Stack <= P.]
+                stack.add(p)
+                p = .llink[p]
+            else if stack.count() > 0       # T4. [P <= Stack.]
+                p = stack.pop() catch -1
+                out.add(.key[p])            # T5. [Visit P.]
+                p = .rlink[p]
+            else
+                break
+        return out
