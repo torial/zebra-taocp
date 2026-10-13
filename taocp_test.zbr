@@ -1036,9 +1036,7 @@ def batch3()
 # -- Batch 4 (2026-10-13): oracles from outside the repository, as above ---------------------
 
 # x as base-65536 digits, least significant first (x >= 0).
-# BUG-567 (zebra-language): a name beginning "int128" followed by more letters lexes as a type
-# name; the natural `int128Digits` is refused, so this is `digitsOf128`.
-def digitsOf128(x0: int128): List(int)
+def int128Digits(x0: int128): List(int)
     var out = List(int)()
     var x: int128 = x0
     var b: int128 = 65536
@@ -1081,7 +1079,7 @@ def batch4()
         for part in 0 : 4
             var p30: int128 = rg.next()
             v = (v << 30) + p30
-        if toDecimal(digitsOf128(v), 65536) != "${v}"
+        if toDecimal(int128Digits(v), 65536) != "${v}"
             conv_bad += 1
     print("radix conversion vs int128 printing: ${conv_bad}/300 differ")   # 0/300
 

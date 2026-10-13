@@ -153,14 +153,16 @@ zebra-language BUG-568 (the missing-return check runs only on the ROOT module).
   every solution under the box's symmetries; the box has no centre row or column, so no
   solution is its own image. The 3 × 20 and 4 × 15 counts instead divide all solutions by 4,
   which is exact because twelve different pieces cannot each map onto themselves.
-- **One workaround for a zebra-language bug, marked where it sits:** the radix-conversion
-  test's digit helper is `digitsOf128`, not `int128Digits`, because a name that BEGINS with a
-  sized type name lexed as that type (BUG-567). The plain-changes test's loop variable is `v`
-  again: BUG-566, which forced a rename there, is fixed in zebra-language `25ac283`.
+- **Requires zebra-language e247060 or later.** Four compiler bugs this library found are
+  fixed there, and the code uses the natural forms the fixes allow: the pentomino table as one
+  multi-line literal (BUG-561), a subscript write on a literal-bound list (BUG-562), `v` as a
+  loop variable beside a List named `v` in the same function (BUG-566), and a helper named
+  `int128Digits` (BUG-567). Each was a marked workaround until its fix landed; removing it, with
+  the suite's output unchanged, was the test of the fix.
 - **`mulMod128` has two paths.** Below 2⁶³ it multiplies directly (the product fits in 126
   bits); above, it doubles and adds, keeping every intermediate below 2m, which is what lets
   rho work on 2⁶⁷ − 1 and F₆ = 2⁶⁴ + 1.
-- **Requires zebra-language 68e80e3 or later.** This batch found two compiler bugs, and the
+- **(Earlier note.)** This batch found two compiler bugs, and the
   code now uses the natural forms their fixes allow: `pentominoShapes` is one nested list
   literal across lines (BUG-561, `5e14144`), and the Stirling tally writes `stirling[mx] += 1`
   on a literal-bound list (BUG-562, `68e80e3`). Both were workarounds until the fixes landed;
