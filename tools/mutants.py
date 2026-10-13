@@ -49,6 +49,23 @@ MUTANTS = [
     ('AVL: A9 balance factor of S wrong', 'taocp.zbr',
      '            if .bal[p] == a\n                .bal[s] = 0 - a\n', '            if .bal[p] == a\n                .bal[s] = 0\n',
      'AVL: in order'),
+    # batch 3 (2026-10-13)
+    ('extended gcd: X3 uses v1 where v2 belongs', 'taocp.zbr',
+     '        var t2: int = u2 - v2 * q', '        var t2: int = u2 - v1 * q', 'extended gcd:'),
+    ('rho: double-and-add forgets to reduce the doubling', 'taocp.zbr',
+     '        x = x + x\n        if x >= m\n            x -= m\n', '        x = x + x\n', 'factor 18446744073709551617'),
+    ('plain changes: P5 forgets the offset s', 'taocp.zbr',
+     '                var y: int = j - q + s', '                var y: int = j - q', 'plain changes:'),
+    ('sideways addition: mu_1 one bit short', 'taocp.zbr',
+     '    y = (y & 858993459) + ((y >> 2) & 858993459)', '    y = (y & 858993458) + ((y >> 2) & 858993459)', 'bit tricks:'),
+    ('bitwise queens: one diagonal shifted the wrong way', 'taocp.zbr',
+     '            c[l + 1] = (c[l] | t) >> 1', '            c[l + 1] = ((c[l] | t) << 1) & mask', 'queens, bitwise:'),
+    ('buddy system: S1 merges with a buddy of another size', 'taocp.zbr',
+     '            if .tag[p] == 0 or .kval[p] != k', '            if .tag[p] == 0', 'buddy system:'),
+    ('merge insertion: search the whole chain, not below a_j', 'taocp.zbr',
+     '                limit = listIndexOf(chain, a[j - 1])', '                limit = chain.count()', 'merge insertion:'),
+    ('karatsuba: forget to subtract u1 v1 from the middle term', 'taocp.zbr',
+     '    digitsSubInPlace(z1, z2, b)\n', '', 'karatsuba:'),
 ]
 
 
@@ -108,7 +125,13 @@ def main():
         open(p, 'w', encoding='utf-8', newline='\n').write(src.replace(old, new))
         r = run(d, zebra)
         got = line_for(r.output, prefix)
-        if r.status in ('timeout', 'memory-cap'):
+        # The check's own line first: a run can print the changed line and THEN hang in a later
+        # section (the Miller-Rabin mutant did, inside the factoring that relies on it).
+        if got is not None and got != want:
+            verdict = f'KILLED by the check: {got}'
+            if r.status != 'exit':
+                verdict += f'  (the run then hit the {r.status})'
+        elif r.status in ('timeout', 'memory-cap'):
             verdict = f'KILLED by the {r.status} (peak {r.peak_mb} MB) -- detected by symptom, not by the check'
         elif got is None:
             verdict = f'KILLED (the run failed, code {r.code}; the check line is absent)'

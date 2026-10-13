@@ -1024,10 +1024,30 @@ def minstdNext(x: int): int
 # given, which makes the answer deterministic and lets a test choose bases that FAIL to catch
 # a composite on purpose. 128-bit arithmetic: n may be close to 2^63, so a product of two
 # residues needs 126 bits.
+# (a * b) mod m for 0 <= a, b < m. Below 2^63 the product fits in 126 bits and is computed
+# directly; above it (Pollard rho on 2^67 - 1 needs that) by doubling and adding, which keeps
+# every intermediate below 2m < 2^127 -- Knuth's 4.6.3 binary method, with "+" in place of
+# "x", so it costs lg b additions instead of one multiplication.
+const MULMOD_DIRECT_LIMIT = 9223372036854775807     # 2^63 - 1
+
 def mulMod128(a: int128, b: int128, m: int128): int128
     require
         m > 0
-    return (a * b) % m
+    if m <= MULMOD_DIRECT_LIMIT
+        return (a * b) % m
+    var x: int128 = a % m
+    var y: int128 = b % m
+    var r: int128 = 0
+    while y > 0
+        if y % 2 == 1
+            r = r + x
+            if r >= m
+                r -= m
+        x = x + x
+        if x >= m
+            x -= m
+        y = y / 2
+    return r
 
 def powMod128(x: int128, e: int128, m: int128): int128
     require
@@ -1548,3 +1568,542 @@ class AvlTree
             else
                 break
         return out
+
+# n prime or a strong probable prime to every listed base, for n up to 2^126 (Pollard rho's
+# cofactors pass 2^64). isProbablePrime above is the int form.
+def isProbablePrime128(n: int128, bases: List(int)): bool
+    if n < 2
+        return false
+    if n < 4
+        return true
+    if n % 2 == 0
+        return false
+    for b in bases
+        var x: int128 = b
+        x = x % n
+        if x > 1 and x < n - 1
+            if not strongProbablePrime(n, x)
+                return false
+    return true
+
+# The first twelve primes: as bases they make Algorithm P deterministic for every n below
+# 3.3 * 10^24 (Sorenson and Webster), beyond anything factored here.
+def mrBases(): List(int)
+    return [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
+
+# -- Vol. 2 4.5.2: Algorithm X, the extended Euclidean algorithm --------------------------
+# [u1, u2, u3] with u1 * u + u2 * v = u3 = gcd(u, v). Knuth's vectors (u1, u2, u3) and
+# (v1, v2, v3), each step replacing one by the other minus q times it.
+def extendedGcd(u: int, v: int): List(int)
+    require
+        u >= 0
+        v >= 0
+    var u1: int = 1                         # X1. [Initialize.]
+    var u2: int = 0
+    var u3: int = u
+    var v1: int = 0
+    var v2: int = 1
+    var v3: int = v
+    while v3 != 0                           # X2. [Is v3 = 0?]
+        var q: int = u3 / v3                # X3. [Divide, subtract.]
+        var t1: int = u1 - v1 * q
+        var t2: int = u2 - v2 * q
+        var t3: int = u3 - v3 * q
+        u1 = v1
+        u2 = v2
+        u3 = v3
+        v1 = t1
+        v2 = t2
+        v3 = t3
+    return [u1, u2, u3]
+
+# a^-1 mod m, or -1 when gcd(a, m) != 1.
+def modInverse(a: int, m: int): int
+    require
+        m > 1
+    var aa: int = ((a % m) + m) % m
+    var r = extendedGcd(aa, m)
+    if r[2] != 1
+        return -1
+    return ((r[0] % m) + m) % m
+
+# -- Vol. 2 4.5.4: Algorithm B, factoring by the rho method --------------------------------
+# Knuth's version of Pollard's rho with Brent's cycle detection: x runs through x <- x^2 + c
+# (mod n), x' is a saved earlier value refreshed at doubling intervals l, and a common factor
+# shows up in gcd(x' - x, n). gcd128 is Algorithm E in 128 bits.
+def gcd128(a0: int128, b0: int128): int128
+    var a: int128 = a0
+    var b: int128 = b0
+    if a < 0
+        a = 0 - a
+    if b < 0
+        b = 0 - b
+    while b != 0
+        var r: int128 = a % b
+        a = b
+        b = r
+    return a
+
+# One factor of composite n (1 < g <= n), with the polynomial x^2 + c. g == n means this c
+# failed (Knuth's B3 termination) and the caller tries another.
+def rhoFactor(n: int128, c: int128): int128
+    var x: int128 = 5                       # B1. [Initialize.]
+    var xs: int128 = 2                      # x'
+    var k: int = 1
+    var l: int = 1
+    while true
+        var g: int128 = gcd128(xs - x, n)   # B3. [Factor found?]
+        if g != 1
+            return g
+        k -= 1                              # B4. [Advance.]
+        if k == 0
+            xs = x
+            l = 2 * l
+            k = l
+        x = (mulMod128(x, x, n) + c) % n
+
+# The prime factors of n >= 1, ascending, with multiplicity. Small primes by trial division
+# (rho's x^2 + c walk is poor on them), the rest by recursive splitting.
+def factor128(n0: int128): List(int128)
+    require
+        n0 >= 1
+    var out = List(int128)()
+    var stack = List(int128)()
+    var n: int128 = n0
+    var p: int128 = 2
+    while p < 1000 and p * p <= n
+        while n % p == 0
+            out.add(p)
+            n = n / p
+        p += 1
+    if n > 1
+        stack.add(n)
+    while stack.count() > 0
+        var m: int128 = stack.pop() catch 1
+        if m == 1
+            continue
+        if isProbablePrime128(m, mrBases())     # B2. [Is n prime?]
+            out.add(m)
+            continue
+        var c: int128 = 1
+        var g: int128 = m
+        while g == m                            # retry with another c when the walk fails
+            # A composite fails for a handful of c at most; one that fails for 100 is not
+            # composite -- the primality verdict above was wrong -- and looping on would hang
+            # (found by the Miller-Rabin mutant in tools/mutants.py).
+            assert c <= 100, "factor128: rho cannot split ${m}; is it really composite?"
+            g = rhoFactor(m, c)
+            c += 1
+        stack.add(g)
+        stack.add(m / g)
+    out.sort()
+    return out
+
+# -- Vol. 4A 7.2.1.2: Algorithm P, plain changes ------------------------------------------
+# All n! permutations of 1..n, each obtained from the one before by swapping two ADJACENT
+# elements (Steinhaus, Johnson and Trotter). c_j counts how far element j has travelled;
+# o_j is its direction. a, c, o are 1-based here.
+def plainChanges(n: int): List(List(int))
+    require
+        n >= 1
+    var out: List(List(int)) = List(List(int))()
+    var a = List(int)()
+    var c = List(int)()
+    var o = List(int)()
+    for j in 0 : n + 1                      # P1. [Initialize.]
+        a.add(j)
+        c.add(0)
+        o.add(1)
+    var j: int = 0
+    var s: int = 0
+    var q: int = 0
+    var step: int = 2
+    while true
+        if step == 2                        # P2. [Visit.]
+            var perm = List(int)()
+            for i in 1 : n + 1
+                perm.add(a[i])
+            out.add(perm)
+            j = n                           # P3. [Prepare for change.]
+            s = 0
+            step = 4
+        else if step == 4                   # P4. [Ready to change?]
+            q = c[j] + o[j]
+            if q < 0
+                step = 7
+            else if q == j
+                step = 6
+            else
+                var x: int = j - c[j] + s   # P5. [Change.]
+                var y: int = j - q + s
+                var t: int = a[x]
+                a[x] = a[y]
+                a[y] = t
+                c[j] = q
+                step = 2
+        else if step == 6                   # P6. [Increase s.]
+            if j == 1
+                break
+            s += 1
+            step = 7
+        else                                # P7. [Switch direction.]
+            o[j] = 0 - o[j]
+            j -= 1
+            step = 4
+    return out
+
+# -- Vol. 4A 7.1.3: bitwise tricks ----------------------------------------------------------
+# Sideways addition nu(x), the number of 1 bits, by Knuth's masks (eq. (62)), here for
+# 32-bit x so every product stays inside 64 bits: pairs, then nybbles, then bytes, then one
+# multiplication by (1 1 1 1) in base 256 sums the four bytes into the top one.
+def sidewaysAddition32(x: int): int
+    require
+        x >= 0
+        x < 4294967296
+    var y: int = x - ((x >> 1) & 1431655765)              # mu_0 = 0x55555555
+    y = (y & 858993459) + ((y >> 2) & 858993459)          # mu_1 = 0x33333333
+    y = (y + (y >> 4)) & 252645135                         # mu_2 = 0x0f0f0f0f
+    return ((y * 16843009) >> 24) & 255                    # 0x01010101
+
+# The ruler function rho(x), the number of trailing 0 bits of x > 0: (x - 1) & ~x has
+# exactly rho(x) ones (Knuth, 7.1.3).
+def rulerFunction(x: int): int
+    require
+        x > 0
+        x < 4294967296
+    return sidewaysAddition32((x - 1) & (~x) & 4294967295)
+
+# -- Vol. 4B 7.2.2: bitwise backtracking for n queens (Algorithm B*) -------------------------
+# a, b, c are the occupied columns and the two diagonal families, as bitmasks; s_l the
+# columns still open at level l, each tried by taking its lowest bit, x & -x.
+def queensBitwise(n: int): int
+    require
+        n >= 1
+        n <= 30
+    var mask: int = (1 << n) - 1
+    var a = List(int)()
+    var b = List(int)()
+    var c = List(int)()
+    var s = List(int)()
+    for i in 0 : n + 1
+        a.add(0)
+        b.add(0)
+        c.add(0)
+        s.add(0)
+    var count: int = 0
+    var l: int = 0
+    s[0] = mask
+    while l >= 0
+        if l == n
+            count += 1
+            l -= 1
+        else if s[l] == 0
+            l -= 1
+        else
+            var t: int = s[l] & (0 - s[l])
+            s[l] = s[l] - t
+            a[l + 1] = a[l] | t
+            b[l + 1] = ((b[l] | t) << 1) & mask
+            c[l + 1] = (c[l] | t) >> 1
+            l += 1
+            if l < n
+                s[l] = mask & (~(a[l] | b[l] | c[l]))
+    return count
+
+# -- Vol. 1 2.5: the buddy system, Algorithms R (reservation) and S (liberation) -------------
+# Memory of 2^m cells. A free block of size 2^k starts at an address divisible by 2^k and is
+# on AVAIL[k], a doubly linked list (LINKF / LINKB, with -1 for none -- the heads are kept
+# apart from the cells, unlike Knuth's in-memory headers). TAG says free, KVAL the size.
+# The buddy of the block at x with size 2^k is at x XOR 2^k.
+class BuddySystem
+    var m: int
+    var avail: List(int)        # AVAIL[k]: first free block of size 2^k, or -1
+    var linkf: List(int)        # per cell: next free block on its list
+    var linkb: List(int)        # per cell: previous free block on its list
+    var tag: List(int)          # per cell: 1 = the start of a FREE block
+    var kval: List(int)         # per cell: k of the free block starting here
+
+    cue init(m: int)
+        require
+            m >= 1
+            m <= 20
+        .m = m
+        .avail = List(int)()
+        for k in 0 : m + 1
+            .avail.add(-1)
+        .linkf = List(int)()
+        .linkb = List(int)()
+        .tag = List(int)()
+        .kval = List(int)()
+        for x in 0 : (1 << m)
+            .linkf.add(-1)
+            .linkb.add(-1)
+            .tag.add(0)
+            .kval.add(0)
+        .pushFree(0, m)                     # all memory is one free block
+
+    def pushFree(x: int, k: int)
+        .tag[x] = 1
+        .kval[x] = k
+        .linkb[x] = -1
+        .linkf[x] = .avail[k]
+        if .avail[k] >= 0
+            .linkb[.avail[k]] = x
+        .avail[k] = x
+
+    def removeFree(x: int, k: int)
+        var f: int = .linkf[x]
+        var bk: int = .linkb[x]
+        if bk >= 0
+            .linkf[bk] = f
+        else
+            .avail[k] = f
+        if f >= 0
+            .linkb[f] = bk
+        .tag[x] = 0
+
+    # Algorithm R: the address of a block of 2^k cells, or -1 when none is free.
+    def reserve(k: int): int
+        require
+            k >= 0
+            k <= .m
+        var j: int = k                      # R1. [Find block.]
+        while j <= .m and .avail[j] < 0
+            j += 1
+        if j > .m
+            return -1
+        var l: int = .avail[j]              # R2. [Remove from list.]
+        .removeFree(l, j)
+        while j > k                         # R3. [Split required?] R4. [Split.]
+            j -= 1
+            .pushFree(l + (1 << j), j)      # the upper half stays free
+        return l
+
+    # Algorithm S: return the block of 2^k cells at l, merging it with free buddies.
+    def release(l0: int, k0: int)
+        require
+            l0 >= 0
+            l0 % (1 << k0) == 0
+        var l: int = l0
+        var k: int = k0
+        while true
+            if k == .m                      # S1. [Is buddy available?]
+                break
+            var p: int = l ^ (1 << k)
+            if .tag[p] == 0 or .kval[p] != k
+                break
+            .removeFree(p, k)               # S2. [Combine with buddy.]
+            k += 1
+            if p < l
+                l = p
+        .pushFree(l, k)                     # S3. [Put on list.]
+
+    # The free blocks, as (address, k) pairs, for the checks.
+    def freeBlocks(): List(int)
+        var out = List(int)()
+        for k in 0 : .m + 1
+            var x: int = .avail[k]
+            while x >= 0
+                out.add(x)
+                out.add(k)
+                x = .linkf[x]
+        return out
+
+# -- Vol. 3 5.3.1: merge insertion (Ford and Johnson) ---------------------------------------
+# Sorting with few comparisons. Pair the keys and compare within each pair; sort the larger
+# ones recursively, by merge insertion; the smaller partner of the least of them goes first,
+# for free. Every other smaller key b_j is then inserted by binary search into the chain
+# BELOW its partner a_j, in Knuth's group order -- b_3 b_2, then b_5 b_4, then b_11 .. b_6,
+# with group boundaries t_k = (2^(k+1) + (-1)^k) / 3 -- which keeps each search to a range of
+# 2^k - 1 keys. Its worst case is F(n) = sum over 1 <= k <= n of ceil(lg(3k/4)) comparisons.
+# Keys are compared ONLY through the counter, so the test can count.
+class CompareCounter
+    var count: int
+
+    cue init()
+        .count = 0
+
+    def less(keys: List(int), i: int, j: int): bool
+        .count += 1
+        return keys[i] < keys[j]
+
+def listIndexOf(xs: List(int), v: int): int
+    for i in 0 : xs.count()
+        if xs[i] == v
+            return i
+    return -1
+
+def listInsertAt(xs: List(int), pos: int, v: int)
+    xs.add(v)
+    var i: int = xs.count() - 1
+    while i > pos
+        xs[i] = xs[i - 1]
+        i -= 1
+    xs[pos] = v
+
+# The positions of `idx` (indices into keys) in increasing order of key.
+def mergeInsertionIdx(keys: List(int), idx: List(int), cc: CompareCounter): List(int)
+    var n: int = idx.count()
+    if n <= 1
+        return idx.copy()
+    var partner = List(int)()               # per call: this level's pairing, by key index
+    for i in 0 : keys.count()
+        partner.add(-1)
+    var bigs = List(int)()
+    for i in 0 : n / 2                      # pair, and compare within each pair
+        var x: int = idx[2 * i]
+        var y: int = idx[2 * i + 1]
+        if cc.less(keys, x, y)
+            bigs.add(y)
+            partner[y] = x
+        else
+            bigs.add(x)
+            partner[x] = y
+    var leftover: int = -1
+    if n % 2 == 1
+        leftover = idx[n - 1]
+    var a = mergeInsertionIdx(keys, bigs, cc)       # a_1 < a_2 < ... < a_m
+    var m: int = a.count()
+    var chain = List(int)()
+    chain.add(partner[a[0]])                        # b_1 < a_1: no comparison
+    for x in a
+        chain.add(x)
+    var total: int = m
+    if leftover >= 0
+        total += 1                                  # the unpaired key is b_{m+1}
+    var prev: int = 1
+    var k: int = 2
+    while prev < total
+        var tk: int = ((1 << (k + 1)) + if(k % 2 == 0, 1, -1)) / 3
+        var hi: int = if(tk < total, tk, total)
+        var j: int = hi
+        while j > prev                              # b_hi, b_{hi-1}, ..., b_{prev+1}
+            var b: int = leftover
+            var limit: int = chain.count()
+            if j <= m
+                b = partner[a[j - 1]]
+                limit = listIndexOf(chain, a[j - 1])    # b_j < a_j: search below it only
+            var lo: int = 0
+            var up: int = limit
+            while lo < up
+                var mid: int = (lo + up) / 2
+                if cc.less(keys, b, chain[mid])
+                    up = mid
+                else
+                    lo = mid + 1
+            listInsertAt(chain, lo, b)
+            j -= 1
+        prev = tk
+        k += 1
+    return chain
+
+def mergeInsertion(keys: List(int), cc: CompareCounter): List(int)
+    var idx = List(int)()
+    for i in 0 : keys.count()
+        idx.add(i)
+    var order = mergeInsertionIdx(keys, idx, cc)
+    var out = List(int)()
+    for i in order
+        out.add(keys[i])
+    return out
+
+# -- Vol. 2 4.3.1 and 4.3.3: multiplication, schoolbook and Karatsuba ------------------------
+# Digits base b, least significant first. Algorithm M is the classical O(mn) method;
+# Karatsuba's (4.3.3) splits each number in two, u = u1 b^h + u0, and gets the product from
+# THREE half-size products: u0 v0, u1 v1, and (u0 + u1)(v0 + v1), whose difference from the
+# other two is the middle term. (Knuth writes the middle product with differences,
+# (u1 - u0)(v0 - v1), to keep it the same size; the sum form used here needs one extra digit
+# and no signs.) Below a cutoff it falls back to Algorithm M.
+const KARATSUBA_CUTOFF = 8
+
+def schoolbookMul(u: List(int), v: List(int), b: int): List(int)
+    var w = List(int)()                     # M1. [Initialize.]
+    for i in 0 : u.count() + v.count()
+        w.add(0)
+    for j in 0 : v.count()                  # M2. [Zero multiplier?] M3-M6 inline
+        if v[j] != 0
+            var k: int = 0
+            for i in 0 : u.count()
+                var t: int = u[i] * v[j] + w[i + j] + k
+                w[i + j] = t % b
+                k = t / b
+            w[j + u.count()] = k
+    return w
+
+def digitsSlice(x: List(int), lo: int, hi: int): List(int)
+    var out = List(int)()
+    for i in lo : hi
+        if i < x.count()
+            out.add(x[i])
+        else
+            out.add(0)
+    return out
+
+def digitsAdd(x: List(int), y: List(int), b: int): List(int)
+    var n: int = if(x.count() > y.count(), x.count(), y.count())
+    var out = List(int)()
+    var carry: int = 0
+    for i in 0 : n
+        var s: int = carry
+        if i < x.count()
+            s += x[i]
+        if i < y.count()
+            s += y[i]
+        out.add(s % b)
+        carry = s / b
+    out.add(carry)
+    return out
+
+# x - y in place, x >= y (as numbers).
+def digitsSubInPlace(x: List(int), y: List(int), b: int)
+    var borrow: int = 0
+    for i in 0 : x.count()
+        var d: int = x[i] - borrow
+        if i < y.count()
+            d -= y[i]
+        if d < 0
+            x[i] = d + b
+            borrow = 1
+        else
+            x[i] = d
+            borrow = 0
+    assert borrow == 0, "digitsSubInPlace: x < y"
+
+# w += x * b^shift, in place; w is long enough.
+def digitsAddShifted(w: List(int), x: List(int), shift: int, b: int)
+    var carry: int = 0
+    var i: int = 0
+    while i < x.count() or carry > 0
+        var s: int = w[i + shift] + carry
+        if i < x.count()
+            s += x[i]
+        w[i + shift] = s % b
+        carry = s / b
+        i += 1
+
+def karatsubaMul(u: List(int), v: List(int), b: int): List(int)
+    var n: int = if(u.count() > v.count(), u.count(), v.count())
+    if u.count() <= KARATSUBA_CUTOFF or v.count() <= KARATSUBA_CUTOFF
+        return schoolbookMul(u, v, b)
+    var h: int = n / 2
+    var u0 = digitsSlice(u, 0, h)
+    var u1 = digitsSlice(u, h, n)
+    var v0 = digitsSlice(v, 0, h)
+    var v1 = digitsSlice(v, h, n)
+    var z0 = karatsubaMul(u0, v0, b)
+    var z2 = karatsubaMul(u1, v1, b)
+    var z1 = karatsubaMul(digitsAdd(u0, u1, b), digitsAdd(v0, v1, b), b)
+    digitsSubInPlace(z1, z0, b)              # (u0 + u1)(v0 + v1) - u0 v0 - u1 v1 = u0 v1 + u1 v0
+    digitsSubInPlace(z1, z2, b)
+    var w = List(int)()
+    for i in 0 : u.count() + v.count() + 2 * n + 2
+        w.add(0)
+    digitsAddShifted(w, z0, 0, b)
+    digitsAddShifted(w, z1, h, b)
+    digitsAddShifted(w, z2, 2 * h, b)
+    var out = List(int)()                    # exactly u.count() + v.count() digits
+    for i in 0 : u.count() + v.count()
+        out.add(w[i])
+    for i in u.count() + v.count() : w.count()
+        assert w[i] == 0, "karatsubaMul: the product overflowed its digits"
+    return out

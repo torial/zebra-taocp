@@ -61,6 +61,14 @@ contract (`require` / `ensure` / `invariant`): checked in an ordinary build, rem
 | `nestedParentheses` — Algorithm P | Vol. 4A §7.2.1.6 | the Catalan numbers for n = 1..10 (OEIS A000108); every string balanced; the order strictly monotone |
 | `langford` — Langford pairs as exact cover | Vol. 4B §7.2.2.1 | twice OEIS A014552 for n = 1..8 (each sequence and its reversal), every solution decoded and checked as a sequence |
 | `pentominoBox` — the twelve pentominoes as exact cover | Vol. 4B §7.2.2.1 | 63 fixed orientations; 3 × 20 has 2 solutions; and in `taocp_heavy_test.zbr`, 6 × 10 has 2339 (Haselgrove, 1960) and 4 × 15 has 368 |
+| `BuddySystem` — Algorithms R and S, the buddy system | Vol. 1 §2.5 | 20,000 random reservations and liberations against a naive scan of memory: a reservation succeeds EXACTLY when an aligned free run of its size exists; free and reserved blocks tile memory every 500 steps; releasing everything leaves one block |
+| `extendedGcd`, `modInverse` — Algorithm X | Vol. 2 §4.5.2 | Bézout's identity and Algorithm E on all 3,600 pairs 1..60; Knuth's pair 40902, 24140 has gcd 34; the inverse of 1..2000 mod 10⁹ + 7 |
+| `factor128` — Algorithm B, Pollard's rho (Brent's cycle detection), 128-bit | Vol. 2 §4.5.4 | published factorisations: F₅ = 641 · 6700417 (Euler), F₆ = 274177 · 67280421310721 (Landry, 1880), 2⁶⁷ − 1 = 193707721 · 761838257287 (Cole, 1903), 2⁵⁹ − 1, (10⁹ + 7)(10⁹ + 9); trial division on every n in 2..20000 |
+| `schoolbookMul`, `karatsubaMul` — Algorithm M and Karatsuba's method | Vol. 2 §4.3.1, §4.3.3 | each other and the test's own multiplier on 200 random pairs base 2¹⁶; (10ᵏ − 1)² = 9…980…01 for k = 1..60 |
+| `mergeInsertion` — Ford–Johnson merge insertion | Vol. 3 §5.3.1 | over ALL n! inputs for n ≤ 8 the worst case is exactly F(n) = Σ⌈lg(3k/4)⌉ = 0, 1, 3, 5, 7, 10, 13, 16; random inputs n = 9..40 sorted, never above F(n) |
+| `plainChanges` — Algorithm P, plain changes | Vol. 4A §7.2.1.2 | n! distinct permutations for n = 1..8, each one adjacent transposition from the last |
+| `sidewaysAddition32`, `rulerFunction` — bitwise tricks | Vol. 4A §7.1.3 | bit-by-bit counting over every x < 2²⁰ and 20,000 random 32-bit x |
+| `queensBitwise` — bitwise backtracking | Vol. 4B §7.2.2 | n queens for n = 1..12 (OEIS A000170, 14200 at n = 12); dancing links agrees for n ≤ 8 |
 
 Every check has also been seen to FAIL: a one-line mutation of the generator's lag, of
 heapsort's step H6, of quicksort's step Q4, of the Gray-code output, of Algorithm C's purify
@@ -83,6 +91,21 @@ part), which the check catches with the counts still RIGHT -- 3339 malformed par
 p(n) unchanged. The per-visit checks are what see it; the count alone would have passed. And
 the first Algorithm T mutant hung rather than answering, which is detection by timeout; its
 replacement is caught by the check itself.
+
+The third batch (2026-10-13) passed every check on its first run, which is exactly when the
+rule matters; `tools/mutants.py` now carries 18 mutants and kills all 18 in about two minutes.
+Fourteen are caught by their check -- Algorithm X using v1 for v2 (3138 Bézout failures),
+plain changes forgetting the offset s (32104 bad steps), a mask one bit short (801415 of
+1068576 values wrong), a diagonal shifted the wrong way (n queens 1, 1, 3, 7, 23, …), merge
+insertion searching the whole chain instead of below a_j (worst cases 8, 12, 15, 18 at
+n = 5..8 against F(n) = 7, 10, 13, 16 -- still sorted; only the comparison count sees it).
+Four are caught by a GUARD rather than by the check, and are listed as such: rho's
+double-and-add without reduction overflows 128 bits and Zebra's integer-overflow check stops
+it; Karatsuba without the middle-term subtraction trips its own "product overflowed its
+digits" assertion; a buddy merge across sizes corrupts the free lists into a loop that the
+memory cap stops; and the Algorithm T mutant above. One more finding from it: with
+Miller–Rabin mutated, `factor128` looped forever trying to split a prime it had been told was
+composite; it now asserts after 100 failed polynomials instead of hanging.
 
 ## Notes for a maintainer
 
@@ -114,6 +137,13 @@ replacement is caught by the check itself.
   every solution under the box's symmetries; the box has no centre row or column, so no
   solution is its own image. The 3 × 20 and 4 × 15 counts instead divide all solutions by 4,
   which is exact because twelve different pieces cannot each map onto themselves.
+- **One workaround for a zebra-language bug, marked where it sits:** the plain-changes test
+  names its loop variable `pv`, because a `for v in ...` variable cannot be typed while another
+  block of the same function declares a List named `v` (BUG-566, filed 2026-10-13). Rename it
+  back once that is fixed -- the test of the fix.
+- **`mulMod128` has two paths.** Below 2⁶³ it multiplies directly (the product fits in 126
+  bits); above, it doubles and adds, keeping every intermediate below 2m, which is what lets
+  rho work on 2⁶⁷ − 1 and F₆ = 2⁶⁴ + 1.
 - **Requires zebra-language 68e80e3 or later.** This batch found two compiler bugs, and the
   code now uses the natural forms their fixes allow: `pentominoShapes` is one nested list
   literal across lines (BUG-561, `5e14144`), and the Stirling tally writes `stirling[mx] += 1`

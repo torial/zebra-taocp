@@ -1,6 +1,6 @@
 # Every expected value below comes from OUTSIDE this repository: Knuth's published test
 # output, the book's worked examples, or a closed-form count. None was recorded from a run.
-use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128, combinations, mpDivide, minstdNext, isProbablePrime, partitions, setPartitions, nestedParentheses, langford, pentominoShapes, orientations, pentominoBox, topologicalSort, AvlTree
+use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128, combinations, mpDivide, minstdNext, isProbablePrime, partitions, setPartitions, nestedParentheses, langford, pentominoShapes, orientations, pentominoBox, topologicalSort, AvlTree, extendedGcd, modInverse, factor128, plainChanges, sidewaysAddition32, rulerFunction, queensBitwise, BuddySystem, CompareCounter, mergeInsertion, schoolbookMul, karatsubaMul
 
 def countPermutations(start: List(int)): int
     var a = start.copy()
@@ -387,6 +387,7 @@ def main()
     print("division: ${d_ok}/3000 vs int128 (${d_addbacks} add-backs), ${big_ok}/300 by u = qv + r")
     batch2()
     batchAvl()
+    batch3()
 
 # -- Batch 2 (2026-10-12): oracles from outside the repository, as above ---------------------
 
@@ -721,3 +722,314 @@ def batchAvl()
         if t.contains(k) != seen[k]
             miss += 1
     print("AVL: perfect after sequential insertion ${perfect}/10, contains() wrong for ${miss} of 5000")   # 10/10, 0
+
+# -- Batch 3 (2026-10-13): oracles from outside the repository, as above ---------------------
+
+# n! (small n).
+def factorial(n: int): int
+    var f: int = 1
+    for i in 2 : n + 1
+        f = f * i
+    return f
+
+# Ford-Johnson's worst case, F(n) = sum_{k=1..n} ceil(lg(3k/4)), computed exactly in integers:
+# ceil(lg(3k/4)) is the least e >= 0 with 4 * 2^e >= 3k (k = 1 gives e = 0).
+def fordJohnsonBound(n: int): int
+    var total: int = 0
+    for k in 1 : n + 1
+        var e: int = 0
+        while 4 * (1 << e) < 3 * k
+            e += 1
+        total += e
+    return total
+
+# Trial division: the independent witness for factor128 on small n.
+def trialFactor(n0: int): List(int)
+    var out = List(int)()
+    var n: int = n0
+    var p: int = 2
+    while p * p <= n
+        while n % p == 0
+            out.add(p)
+            n = n / p
+        p += 1
+    if n > 1
+        out.add(n)
+    return out
+
+def batch3()
+    # Vol. 2 4.5.2, Algorithm X: Bezout's identity u1 u + u2 v = gcd on every pair 1..60, with
+    # the gcd agreeing with Algorithm E; Knuth's worked pair 40902, 24140 has gcd 34; and the
+    # inverse of every a = 1..2000 modulo the prime 1000000007 satisfies a a^-1 = 1.
+    var bez_bad: int = 0
+    for u in 1 : 61
+        for v in 1 : 61
+            var r = extendedGcd(u, v)
+            if r[0] * u + r[1] * v != r[2] or r[2] != gcd(u, v)
+                bez_bad += 1
+    var inv_bad: int = 0
+    for a in 1 : 2001
+        var ia: int = modInverse(a, 1000000007)
+        if (a * ia) % 1000000007 != 1
+            inv_bad += 1
+    print("extended gcd: ${bez_bad} Bezout failures, gcd(40902, 24140) = ${extendedGcd(40902, 24140)[2]}, ${inv_bad} bad inverses, 6^-1 mod 9 = ${modInverse(6, 9)}")
+    # 0 Bezout failures, gcd(40902, 24140) = 34, 0 bad inverses, 6^-1 mod 9 = -1
+
+    # Vol. 2 4.5.4, Algorithm B against published factorisations: Euler's F5 = 2^32 + 1 =
+    # 641 * 6700417; Landry's F6 = 2^64 + 1 = 274177 * 67280421310721 (1880); Cole's
+    # 2^67 - 1 = 193707721 * 761838257287 (1903); 2^59 - 1 = 179951 * 3203431780337; and
+    # (10^9 + 7)(10^9 + 9). The product of the factors is checked against n in each case.
+    var one: int128 = 1
+    var targets = List(int128)()
+    targets.add((one << 32) + 1)
+    targets.add((one << 64) + 1)
+    targets.add((one << 67) - 1)
+    targets.add((one << 59) - 1)
+    var p7: int128 = 1000000007
+    var p9: int128 = 1000000009
+    targets.add(p7 * p9)
+    for t in targets
+        var fs = factor128(t)
+        var prod: int128 = 1
+        for f in fs
+            prod = prod * f
+        print("factor ${t} = ${fs} (product ${if(prod == t, "matches", "WRONG")})")
+    # factor 4294967297 = [641, 6700417] (product matches)
+    # factor 18446744073709551617 = [274177, 67280421310721] (product matches)
+    # factor 147573952589676412927 = [193707721, 761838257287] (product matches)
+    # factor 576460752303423487 = [179951, 3203431780337] (product matches)
+    # factor 1000000016000000063 = [1000000007, 1000000009] (product matches)
+    # And against trial division, every n in 2..20000, factor by factor.
+    var fact_bad: int = 0
+    for n in 2 : 20001
+        var a = factor128(n)
+        var b = trialFactor(n)
+        if a.count() != b.count()
+            fact_bad += 1
+        else
+            for i in 0 : a.count()
+                var bi: int128 = b[i]
+                if a[i] != bi
+                    fact_bad += 1
+    print("rho vs trial division, 2..20000: ${fact_bad} disagreements")    # 0
+
+    # Vol. 4A 7.2.1.2, Algorithm P (plain changes): n! permutations for n = 1..8, all distinct,
+    # each differing from the one before by ONE ADJACENT transposition.
+    var pc_counts = List(int)()
+    var pc_bad: int = 0
+    for n in 1 : 9
+        var ps = plainChanges(n)
+        pc_counts.add(ps.count())
+        var codes = List(int)()
+        for i in 0 : ps.count()
+            var code: int = 0
+            # BUG-566 (zebra-language): `v` here cannot be typed while the Karatsuba block below
+            # declares a List named `v` in the same function; a distinct name works.
+            for pv in ps[i]
+                code = code * 10 + pv
+            codes.add(code)
+            if i > 0
+                var diffs: int = 0
+                var first: int = -1
+                for k in 0 : n
+                    if ps[i][k] != ps[i - 1][k]
+                        diffs += 1
+                        if first < 0
+                            first = k
+                if diffs != 2 or ps[i][first] != ps[i - 1][first + 1] or ps[i][first + 1] != ps[i - 1][first]
+                    pc_bad += 1
+        codes.sort()
+        for i in 1 : codes.count()
+            if codes[i] == codes[i - 1]
+                pc_bad += 1
+        if ps.count() != factorial(n)
+            pc_bad += 1
+    print("plain changes: ${pc_counts}, ${pc_bad} bad steps or repeats")
+    # [1, 2, 6, 24, 120, 720, 5040, 40320], 0 bad steps or repeats
+
+    # Vol. 4A 7.1.3: sideways addition and the ruler function against bit-by-bit loops, every x
+    # below 2^20 and 20000 random 32-bit x.
+    var bits_bad: int = 0
+    var bg = RanArray(577215)
+    for i in 0 : (1 << 20) + 20000
+        var x: int = i
+        if i >= (1 << 20)
+            x = ((bg.next() << 2) ^ bg.next()) & 4294967295
+        var naive: int = 0
+        var y: int = x
+        while y > 0
+            naive += y & 1
+            y = y >> 1
+        if sidewaysAddition32(x) != naive
+            bits_bad += 1
+        if x > 0
+            var tz: int = 0
+            while ((x >> tz) & 1) == 0
+                tz += 1
+            if rulerFunction(x) != tz
+                bits_bad += 1
+    print("bit tricks: ${bits_bad} disagreements over ${(1 << 20) + 20000} values")   # 0 over 1068576
+
+    # Vol. 4B 7.2.2, bitwise backtracking: n queens for n = 1..12 (OEIS A000170), and the same
+    # counts as dancing links (Algorithm X above) for n = 1..8.
+    var qb = List(int)()
+    var qb_dlx_bad: int = 0
+    for n in 1 : 13
+        var c: int = queensBitwise(n)
+        qb.add(c)
+        if n <= 8 and c != queens(n).solutions(0).count()
+            qb_dlx_bad += 1
+    print("queens, bitwise: ${qb}, ${qb_dlx_bad} disagree with dancing links")
+    # [1, 0, 0, 2, 10, 4, 40, 92, 352, 724, 2680, 14200], 0 disagree
+
+    # Vol. 1 2.5, the buddy system, 2^10 cells, 20000 random reservations and liberations. A
+    # reservation of 2^k must succeed EXACTLY when some aligned run of 2^k cells is free -- with
+    # buddies merged eagerly, any such run lies inside one free block of size >= 2^k -- and
+    # must return such a run. Every 500 steps, and at the end, the free blocks and the
+    # reserved ones must tile memory exactly. Releasing everything must leave ONE block.
+    var bs = BuddySystem(10)
+    var size: int = 1 << 10
+    var used = List(bool)()
+    for i in 0 : size
+        used.add(false)
+    var held = List(int)()                   # (address, k) pairs
+    var buddy_bad: int = 0
+    var reserves: int = 0
+    var refusals: int = 0
+    var rg = RanArray(141592)
+    for step in 0 : 20000
+        if held.count() == 0 or rg.next() % 3 != 0
+            var k: int = rg.next() % 7
+            var w: int = 1 << k
+            var naive_ok: bool = false
+            var start: int = 0
+            while start < size and not naive_ok
+                var free_run: bool = true
+                for c in start : start + w
+                    if used[c]
+                        free_run = false
+                if free_run
+                    naive_ok = true
+                start += w
+            var got: int = bs.reserve(k)
+            if got < 0
+                refusals += 1
+                if naive_ok
+                    buddy_bad += 1
+            else
+                reserves += 1
+                if not naive_ok or got % w != 0 or got + w > size
+                    buddy_bad += 1
+                else
+                    for c in got : got + w
+                        if used[c]
+                            buddy_bad += 1
+                        used[c] = true
+                    held.add(got)
+                    held.add(k)
+        else
+            var pick: int = (rg.next() % (held.count() / 2)) * 2
+            var addr: int = held[pick]
+            var kk: int = held[pick + 1]
+            bs.release(addr, kk)
+            for c in addr : addr + (1 << kk)
+                used[c] = false
+            held[pick] = held[held.count() - 2]          # remove the pair (order irrelevant)
+            held[pick + 1] = held[held.count() - 1]
+            var dummy1: int = held.pop() catch 0
+            var dummy2: int = held.pop() catch 0
+        if step % 500 == 499
+            var cover = List(int)()
+            for i in 0 : size
+                cover.add(0)
+            var fb = bs.freeBlocks()
+            for i in 0 : fb.count() / 2
+                for c in fb[2 * i] : fb[2 * i] + (1 << fb[2 * i + 1])
+                    cover[c] += 1
+            for i in 0 : held.count() / 2
+                for c in held[2 * i] : held[2 * i] + (1 << held[2 * i + 1])
+                    cover[c] += 1
+            for i in 0 : size
+                if cover[i] != 1
+                    buddy_bad += 1
+    while held.count() > 0
+        var kk: int = held.pop() catch 0
+        var addr: int = held.pop() catch 0
+        bs.release(addr, kk)
+    print("buddy system: ${reserves} reservations, ${refusals} refusals, ${buddy_bad} wrong, after releasing all: ${bs.freeBlocks()}")
+    # N reservations, M refusals, 0 wrong, after releasing all: [0, 10]
+
+    # Vol. 3 5.3.1, merge insertion. Over ALL n! orderings for n = 1..8, the worst case must be
+    # exactly F(n) = sum ceil(lg(3k/4)) -- 0, 1, 3, 5, 7, 10, 13, 16 -- and every output sorted;
+    # then 100 random orderings for each n = 9..40: sorted, and never more than F(n).
+    var fj_worst = List(int)()
+    var fj_bound = List(int)()
+    var fj_bad: int = 0
+    for n in 1 : 9
+        var perm = List(int)()
+        for i in 0 : n
+            perm.add(i)
+        var worst: int = 0
+        var more: bool = true
+        while more
+            var cc = CompareCounter()
+            var out = mergeInsertion(perm, cc)
+            for i in 0 : n
+                if out[i] != i
+                    fj_bad += 1
+            if cc.count > worst
+                worst = cc.count
+            more = nextPermutation(perm)
+        fj_worst.add(worst)
+        fj_bound.add(fordJohnsonBound(n))
+    var fg = RanArray(918273)
+    var fj_over: int = 0
+    for n in 9 : 41
+        for trial in 0 : 100
+            var keys = List(int)()
+            for i in 0 : n
+                keys.add(fg.next() % 1000)
+            var cc = CompareCounter()
+            var out = mergeInsertion(keys, cc)
+            var ref = keys.copy()
+            heapSort(ref)
+            if out != ref
+                fj_bad += 1
+            if cc.count > fordJohnsonBound(n)
+                fj_over += 1
+    print("merge insertion: worst ${fj_worst}, F(n) ${fj_bound}, ${fj_bad} unsorted, ${fj_over} over F(n) for n = 9..40")
+    # worst [0, 1, 3, 5, 7, 10, 13, 16], F(n) [0, 1, 3, 5, 7, 10, 13, 16], 0 unsorted, 0 over
+
+    # Vol. 2 4.3.3, Karatsuba: equal to Algorithm M and to this file's own mpMul on 200 random
+    # pairs of up to 120 digits base 2^16; and (10^k - 1)^2 = 99..9 8 00..0 1 (k-1 nines, k-1
+    # zeros) for every k = 1..60.
+    var kg = RanArray(271828)
+    var ka_bad: int = 0
+    for trial in 0 : 200
+        var lu: int = 1 + kg.next() % 120
+        var lv: int = 1 + kg.next() % 120
+        var u = List(int)()
+        var v = List(int)()
+        for i in 0 : lu
+            u.add(kg.next() % 65536)
+        for i in 0 : lv
+            v.add(kg.next() % 65536)
+        var kp = karatsubaMul(u, v, 65536)
+        if kp != schoolbookMul(u, v, 65536) or kp != mpMul(u, v, 65536)
+            ka_bad += 1
+    var nines_bad: int = 0
+    for k in 1 : 61
+        var nine = List(int)()
+        for i in 0 : k
+            nine.add(9)
+        var sq = karatsubaMul(nine, nine, 10)       # least significant digit first
+        var want = List(int)()
+        want.add(1)
+        for i in 0 : k - 1
+            want.add(0)
+        want.add(8)
+        for i in 0 : k - 1
+            want.add(9)
+        if sq != want
+            nines_bad += 1
+    print("karatsuba: ${ka_bad}/200 differ from Algorithm M, ${nines_bad}/60 squares of 10^k - 1 wrong")   # 0/200, 0/60
