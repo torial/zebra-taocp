@@ -7,7 +7,19 @@ outside this repository.
 ```bash
 zebra taocp_test.zbr                      # the everyday suite, under a minute
 zebra --release taocp_heavy_test.zbr      # the two large pentomino boxes, a few minutes
+python tools/mutants.py --zebra <zebra>   # every check seen to fail (~1 min), memory-capped
 ```
+
+**Memory.** The suites are small: measured with the whole process tree sampled, the everyday
+suite peaks near 300 MB including the zig compile (the program itself about 100 MB), the heavy
+suite similar, and a cold `--release` build about 1 GB. A mutant is a different matter -- one
+that never terminates can allocate without bound. On 2026-10-12 the Algorithm T mutant that
+queues a node too early looped and appended for a 900-second timeout; measured afterwards, it
+reaches 8.8 GB working set and 16.7 GB committed within a minute, and it slowed the machine for
+other work while the harness scored it, correctly but silently, as killed. `tools/mutants.py`
+now runs every mutant under `tools/run_capped.py` (a Windows Job Object, 1 GB, 300 s), which
+stops that mutant in seconds. The cap is not tight -- the overshoot is about one allocation,
+measured up to ~3x -- so read it as "a runaway stops quickly", not "never exceeds 1 GB".
 
 ## Why these, and why checked this way
 
