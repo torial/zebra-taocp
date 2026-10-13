@@ -102,11 +102,11 @@ replacement is caught by the check itself.
   every solution under the box's symmetries; the box has no centre row or column, so no
   solution is its own image. The 3 × 20 and 4 × 15 counts instead divide all solutions by 4,
   which is exact because twelve different pieces cannot each map onto themselves.
-- **Two workarounds for zebra-language bugs, each marked where it sits:** `pentominoShapes`
-  builds its table a row at a time because a list literal cannot span lines (BUG-561), and the
-  Stirling tally in the test uses `set()` because a subscript write on a literal-bound list is
-  emitted `var` and zig refuses it (BUG-562). Remove the workaround and rerun once the bug is
-  fixed -- that is the test of the fix.
+- **Requires zebra-language 68e80e3 or later.** This batch found two compiler bugs, and the
+  code now uses the natural forms their fixes allow: `pentominoShapes` is one nested list
+  literal across lines (BUG-561, `5e14144`), and the Stirling tally writes `stirling[mx] += 1`
+  on a literal-bound list (BUG-562, `68e80e3`). Both were workarounds until the fixes landed;
+  removing them was the test of the fixes, and the suite's output was identical, line for line.
 - **The heavy suite is separate because it is slow in a debug build:** measured 2026-10-12 on
   a shared machine, 6 × 10 took 160 s in debug, 64 s with `--release` and 35 s with
   `--release --turbo` (each including compilation); 4 × 15 took 224 s in debug.

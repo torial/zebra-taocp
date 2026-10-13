@@ -544,9 +544,7 @@ def batch2()
         for v in r
             if v > mx
                 mx = v
-        # BUG-562 (zebra-language): `stirling[mx] += 1` on a literal-bound list is emitted
-        # `var` and zig refuses it; set() is the path BUG-495 fixed.
-        stirling.set(mx, stirling[mx] + 1)
+        stirling[mx] += 1
     print("set partitions: ${bells}, S(5,k) = ${stirling}, ${h_bad} malformed")
     # [1, 2, 5, 15, 52, 203, 877, 4140, 21147], S(5,k) = [1, 15, 25, 10, 1], 0 malformed
 
