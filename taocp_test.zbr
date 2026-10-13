@@ -1,6 +1,6 @@
 # Every expected value below comes from OUTSIDE this repository: Knuth's published test
 # output, the book's worked examples, or a closed-form count. None was recorded from a run.
-use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128, combinations, mpDivide, minstdNext, isProbablePrime, partitions, setPartitions, nestedParentheses, langford, pentominoShapes, orientations, pentominoBox, topologicalSort, AvlTree, extendedGcd, modInverse, factor128, plainChanges, sidewaysAddition32, rulerFunction, queensBitwise, BuddySystem, CompareCounter, mergeInsertion, schoolbookMul, karatsubaMul
+use taocp exposing RanArray, gcd, binaryGcd, powMod, heapSort, quickSort, quickSortM, insertionSort, isSorted, binarySearch, nextPermutation, grayCodes, ExactCover, queens, spectralTest, isqrt128, floorDiv128, combinations, mpDivide, minstdNext, isProbablePrime, partitions, setPartitions, nestedParentheses, langford, pentominoShapes, orientations, pentominoBox, topologicalSort, AvlTree, extendedGcd, modInverse, factor128, plainChanges, sidewaysAddition32, rulerFunction, queensBitwise, BuddySystem, CompareCounter, mergeInsertion, schoolbookMul, karatsubaMul, mpMulSmall, toDecimal, LinearProbing, mixedRadixGray, partitionsInto, SearchTree
 
 def countPermutations(start: List(int)): int
     var a = start.copy()
@@ -388,6 +388,7 @@ def main()
     batch2()
     batchAvl()
     batch3()
+    batch4()
 
 # -- Batch 2 (2026-10-12): oracles from outside the repository, as above ---------------------
 
@@ -823,10 +824,8 @@ def batch3()
         var codes = List(int)()
         for i in 0 : ps.count()
             var code: int = 0
-            # BUG-566 (zebra-language): `v` here cannot be typed while the Karatsuba block below
-            # declares a List named `v` in the same function; a distinct name works.
-            for pv in ps[i]
-                code = code * 10 + pv
+            for v in ps[i]
+                code = code * 10 + v
             codes.add(code)
             if i > 0
                 var diffs: int = 0
@@ -1033,3 +1032,201 @@ def batch3()
         if sq != want
             nines_bad += 1
     print("karatsuba: ${ka_bad}/200 differ from Algorithm M, ${nines_bad}/60 squares of 10^k - 1 wrong")   # 0/200, 0/60
+
+# -- Batch 4 (2026-10-13): oracles from outside the repository, as above ---------------------
+
+# x as base-65536 digits, least significant first (x >= 0).
+# BUG-567 (zebra-language): a name beginning "int128" followed by more letters lexes as a type
+# name; the natural `int128Digits` is refused, so this is `digitsOf128`.
+def digitsOf128(x0: int128): List(int)
+    var out = List(int)()
+    var x: int128 = x0
+    var b: int128 = 65536
+    if x == 0
+        out.add(0)
+    while x > 0
+        var d: int128 = x % b
+        out.add(d.toInt())
+        x = x / b
+    return out
+
+def batch4()
+    # Vol. 2 4.4, Method 2a, against published decimal expansions: 2^100, 2^200, 3^100 and
+    # 100!. Built here by repeated single-digit multiplication (base 2^16), then converted.
+    var two100 = [1]
+    for i in 0 : 100
+        two100 = mpMulSmall(two100, 2, 65536)
+    var two200 = two100.copy()
+    for i in 0 : 100
+        two200 = mpMulSmall(two200, 2, 65536)
+    var three100 = [1]
+    for i in 0 : 100
+        three100 = mpMulSmall(three100, 3, 65536)
+    var fact100 = [1]
+    for k in 1 : 101
+        fact100 = mpMulSmall(fact100, k, 65536)
+    print("2^100 = ${toDecimal(two100, 65536)}")    # 1267650600228229401496703205376
+    print("2^200 = ${toDecimal(two200, 65536)}")    # 1606938044258990275541962092341162602522202993782792835301376
+    print("3^100 = ${toDecimal(three100, 65536)}")  # 515377520732011331036461129765621272702107522001
+    print("100! = ${toDecimal(fact100, 65536)}")
+    # 93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000
+    # Their last nine digits by modular arithmetic (Algorithm A, nothing shared): 2^100 mod 10^9
+    # and 3^100 mod 10^9 must be the strings' tails.
+    print("tails mod 10^9: ${powMod(2, 100, 1000000000)} ${powMod(3, 100, 1000000000)}")   # 703205376 107522001
+    # Against the runtime's own int128 printer on 300 random values below 2^120.
+    var rg = RanArray(662607)
+    var conv_bad: int = 0
+    for trial in 0 : 300
+        var v: int128 = 0
+        for part in 0 : 4
+            var p30: int128 = rg.next()
+            v = (v << 30) + p30
+        if toDecimal(digitsOf128(v), 65536) != "${v}"
+            conv_bad += 1
+    print("radix conversion vs int128 printing: ${conv_bad}/300 differ")   # 0/300
+
+    # Vol. 3 6.4, Algorithms L and R: 40000 random insertions, deletions and searches on keys
+    # 0..1999 in a table of 1009 slots, against a plain membership array, with at most 900 keys
+    # live. After every 1000 operations, and at the end, EVERY live key must be found -- a
+    # deletion that breaks a probe chain loses keys silently, and only this sees it.
+    var lp = LinearProbing(1009)
+    var member = List(bool)()
+    for i in 0 : 2000
+        member.add(false)
+    var live: int = 0
+    var lp_bad: int = 0
+    var lg = RanArray(299792)
+    for op in 0 : 40000
+        var k: int = lg.next() % 2000
+        var kind: int = lg.next() % 3
+        if kind == 0 and live < 900
+            var slot: int = lp.searchInsert(k, true)
+            if slot < 0 or lp.keys[slot] != k
+                lp_bad += 1
+            if not member[k]
+                member[k] = true
+                live += 1
+        else if kind == 1
+            var gone: bool = lp.delete(k)
+            if gone != member[k]
+                lp_bad += 1
+            if member[k]
+                member[k] = false
+                live -= 1
+        else
+            if (lp.searchInsert(k, false) >= 0) != member[k]
+                lp_bad += 1
+        if op % 1000 == 999
+            for kk in 0 : 2000
+                if member[kk] and lp.searchInsert(kk, false) < 0
+                    lp_bad += 1
+    var lp_found: int = 0
+    for kk in 0 : 2000
+        if member[kk] and lp.searchInsert(kk, false) >= 0
+            lp_found += 1
+    print("linear probing: ${lp_bad} disagreements, ${lp_found} of ${live} live keys found, N = ${lp.n}")
+    # 0 disagreements, L of L live keys found, N = L
+
+    # Vol. 4A 7.2.1.1, Algorithm H: the product of the radices, every tuple distinct and in
+    # range, each step changing ONE coordinate by +1 or -1.
+    var radix_sets: List(List(int)) = List(List(int))()
+    radix_sets.add([2, 2, 2, 2])
+    radix_sets.add([3, 3, 3])
+    radix_sets.add([4, 2, 5])
+    radix_sets.add([10, 10])
+    radix_sets.add([2, 3, 4, 5])
+    var gray_counts = List(int)()
+    var mg_bad: int = 0
+    for rs in radix_sets
+        var tuples = mixedRadixGray(rs)
+        gray_counts.add(tuples.count())
+        var product: int = 1
+        for r in rs
+            product = product * r
+        if tuples.count() != product
+            mg_bad += 1
+        var codes = List(int)()
+        for t in 0 : tuples.count()
+            var code: int = 0
+            for j in 0 : rs.count()
+                if tuples[t][j] < 0 or tuples[t][j] >= rs[j]
+                    mg_bad += 1
+                code = code * 100 + tuples[t][j]
+            codes.add(code)
+            if t > 0
+                var changed: int = 0
+                for j in 0 : rs.count()
+                    var dlt: int = tuples[t][j] - tuples[t - 1][j]
+                    if dlt != 0
+                        changed += 1
+                        if dlt != 1 and dlt != -1
+                            mg_bad += 1
+                if changed != 1
+                    mg_bad += 1
+        codes.sort()
+        for i in 1 : codes.count()
+            if codes[i] == codes[i - 1]
+                mg_bad += 1
+    print("mixed-radix Gray: ${gray_counts}, ${mg_bad} bad")   # [16, 27, 40, 100, 120], 0 bad
+
+    # Vol. 4A 7.2.1.4, Algorithm H: the partitions of n into exactly m parts, summed over m,
+    # must give p(n) (OEIS A000041) for n = 1..20; for each m they must be exactly batch 2's
+    # partitions of n having m parts (Algorithm P, a different method); each one valid.
+    var pm_totals = List(int)()
+    var pm_bad: int = 0
+    for n in 1 : 21
+        var all = partitions(n)
+        var total: int = 0
+        for m in 1 : n + 1
+            var pm = partitionsInto(n, m)
+            total += pm.count()
+            var ref: int = 0
+            for p in all
+                if p.count() == m
+                    ref += 1
+            if pm.count() != ref
+                pm_bad += 1
+            for p in pm
+                var sum: int = 0
+                for i in 0 : p.count()
+                    sum += p[i]
+                    if p[i] < 1 or (i > 0 and p[i] > p[i - 1])
+                        pm_bad += 1
+                if sum != n or p.count() != m
+                    pm_bad += 1
+        pm_totals.add(total)
+    print("partitions into m parts, summed: ${pm_totals}, ${pm_bad} bad")
+    # [1, 2, 3, 5, 7, 11, 15, 22, 30, 42, 56, 77, 101, 135, 176, 231, 297, 385, 490, 627], 0 bad
+
+    # Vol. 3 6.2.2, Algorithms T and D: 20000 random insertions and deletions of keys 0..999
+    # against a membership array; the symmetric order must be exactly the live keys, sorted,
+    # after every 1000 operations and at the end.
+    var st = SearchTree()
+    var inside = List(bool)()
+    for i in 0 : 1000
+        inside.add(false)
+    var st_bad: int = 0
+    var sg = RanArray(161803)
+    for op in 0 : 20000
+        var k: int = sg.next() % 1000
+        if sg.next() % 2 == 0
+            if st.insert(k) == inside[k]
+                st_bad += 1
+            inside[k] = true
+        else
+            if st.delete(k) != inside[k]
+                st_bad += 1
+            inside[k] = false
+        if op % 1000 == 999
+            var want = List(int)()
+            for kk in 0 : 1000
+                if inside[kk]
+                    want.add(kk)
+            if st.inorder() != want
+                st_bad += 1
+    var live_keys: int = 0
+    for kk in 0 : 1000
+        if inside[kk]
+            live_keys += 1
+    print("search tree insert/delete: ${st_bad} disagreements, ${st.inorder().count()} keys = ${live_keys} live")
+    # 0 disagreements, L keys = L live

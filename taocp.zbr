@@ -2107,3 +2107,305 @@ def karatsubaMul(u: List(int), v: List(int), b: int): List(int)
     for i in u.count() + v.count() : w.count()
         assert w[i] == 0, "karatsubaMul: the product overflowed its digits"
     return out
+
+# -- Vol. 2 4.4: radix conversion, Method 2a ----------------------------------------------
+# A multiple-precision number (digits base b <= 2^16, least significant first) to decimal, by
+# repeated SHORT division by 10^4: each division's remainder is the next four decimal digits,
+# from the right. mpMulSmall / mpDivSmall are 4.3.1's single-digit cases.
+def mpMulSmall(u: List(int), k: int, b: int): List(int)
+    require
+        k >= 0
+        k < b
+    var out = List(int)()
+    var carry: int = 0
+    for d in u
+        var t: int = d * k + carry
+        out.add(t % b)
+        carry = t / b
+    while carry > 0
+        out.add(carry % b)
+        carry = carry / b
+    return out
+
+# [quotient, [remainder]] of u / d for 0 < d < b, by Knuth's short division (4.3.1, ex. 16).
+def mpDivSmall(u: List(int), d: int, b: int): List(List(int))
+    require
+        d > 0
+        d < b
+    var q = List(int)()
+    for i in 0 : u.count()
+        q.add(0)
+    var r: int = 0
+    var k: int = u.count() - 1
+    while k >= 0
+        var cur: int = r * b + u[k]
+        q[k] = cur / d
+        r = cur % d
+        k -= 1
+    while q.count() > 1 and q[q.count() - 1] == 0
+        var dropped: int = q.pop() catch 0
+    return [q, [r]]
+
+def mpIsZero(u: List(int)): bool
+    for d in u
+        if d != 0
+            return false
+    return true
+
+def toDecimal(u0: List(int), b: int): str
+    require
+        b > 10000
+        b <= 65536
+    if mpIsZero(u0)
+        return "0"
+    var groups = List(int)()                 # four decimal digits each, least significant first
+    var u = u0.copy()
+    while not mpIsZero(u)
+        var qr = mpDivSmall(u, 10000, b)
+        groups.add(qr[1][0])
+        u = qr[0]
+    var s: str = groups[groups.count() - 1].toString()
+    var k: int = groups.count() - 2
+    while k >= 0                             # inner groups keep their leading zeros
+        var g: str = groups[k].toString()
+        while g.len < 4
+            g = "0" + g
+        s = s + g
+        k -= 1
+    return s
+
+# -- Vol. 3 6.4: Algorithms L and R, linear probing with deletion -----------------------------
+# Open addressing in a table of M slots, probing DOWNWARD (i <- i - 1, wrapping) from the home
+# address h(K) = K mod M. Algorithm R deletes WITHOUT a "deleted" marker: it empties the slot,
+# then walks on and moves back any later key whose home address no longer lets a search reach
+# it -- a key at i with home r can stay unless r lies cyclically between i and the hole j.
+class LinearProbing
+    var m: int
+    var keys: List(int)        # -1 = empty
+    var n: int
+
+    cue init(m: int)
+        require
+            m >= 2
+        .m = m
+        .keys = List(int)()
+        for i in 0 : m
+            .keys.add(-1)
+        .n = 0
+
+    def home(k: int): int
+        return k % .m
+
+    # Algorithm L. The slot holding k, after inserting it if absent; -1 if the table is full
+    # (Knuth stops at N = M - 1, so one slot always stays empty and every search ends).
+    def searchInsert(k: int, insert: bool): int
+        require
+            k >= 0
+        var i: int = .home(k)                # L1. [Hash.]
+        while true
+            if .keys[i] == -1                # L2. [Compare.]
+                if not insert
+                    return -1
+                if .n == .m - 1              # L4. [Insert.]
+                    return -1
+                .n += 1
+                .keys[i] = k
+                return i
+            if .keys[i] == k
+                return i
+            i -= 1                           # L3. [Advance to next.]
+            if i < 0
+                i += .m
+
+    # Algorithm R: delete the key at slot i.
+    def deleteAt(i0: int)
+        require
+            .keys[i0] != -1
+        var i: int = i0
+        var j: int = i0
+        .keys[i] = -1                        # R1. [Empty a cell.]
+        .n -= 1
+        while true
+            i -= 1                           # R2. [Decrease i.]
+            if i < 0
+                i += .m
+            if .keys[i] == -1                # R3. [Inspect TABLE[i].]
+                return
+            var r: int = .home(.keys[i])
+            # R4. [Ask if r lies cyclically between i and j: then the key can stay.]
+            if (i <= r and r < j) or (r < j and j < i) or (j < i and i <= r)
+                continue
+            .keys[j] = .keys[i]              # R5. [Move a record.]
+            .keys[i] = -1
+            j = i
+
+    def delete(k: int): bool
+        var i: int = .searchInsert(k, false)
+        if i < 0
+            return false
+        .deleteAt(i)
+        return true
+
+# -- Vol. 4A 7.2.1.1: Algorithm H, loopless reflected mixed-radix Gray generation -------------
+# All n-tuples a_0 .. a_{n-1} with 0 <= a_j < m_j, each step changing ONE a_j by +1 or -1.
+# o_j is a_j's direction; the focus pointers f_j make each step O(1) -- no loop over j.
+def mixedRadixGray(radices: List(int)): List(List(int))
+    require
+        radices.count() >= 1
+    var n: int = radices.count()
+    for r in radices
+        assert r >= 2, "every radix must be at least 2"
+    var out: List(List(int)) = List(List(int))()
+    var a = List(int)()
+    var f = List(int)()
+    var o = List(int)()
+    for j in 0 : n                           # H1. [Initialize.]
+        a.add(0)
+        f.add(j)
+        o.add(1)
+    f.add(n)
+    while true
+        out.add(a.copy())                    # H2. [Visit.]
+        var j: int = f[0]                    # H3. [Choose j.]
+        f[0] = 0
+        if j == n
+            break
+        a[j] = a[j] + o[j]                   # H4. [Change coordinate j.]
+        if a[j] == 0 or a[j] == radices[j] - 1   # H5. [Reflect?]
+            o[j] = 0 - o[j]
+            f[j] = f[j + 1]
+            f[j + 1] = j + 1
+    return out
+
+# -- Vol. 4A 7.2.1.4: Algorithm H, partitions of n into exactly m parts --------------------
+# a_1 >= a_2 >= ... >= a_m >= 1, a_1 + ... + a_m = n; a_{m+1} = -1 is the sentinel that
+# stops step H4. Knuth's algorithm needs m >= 2; m = 1 has the one partition (n).
+def partitionsInto(n: int, m: int): List(List(int))
+    require
+        m >= 1
+        n >= m
+    var out: List(List(int)) = List(List(int))()
+    if m == 1
+        out.add([n])
+        return out
+    var a = List(int)()                      # a[1] .. a[m], a[m+1]; a[0] unused
+    a.add(0)
+    a.add(n - m + 1)                         # H1. [Initialize.]
+    for j in 2 : m + 1
+        a.add(1)
+    a.add(-1)
+    while true
+        var part = List(int)()               # H2. [Visit.]
+        for j in 1 : m + 1
+            part.add(a[j])
+        out.add(part)
+        if a[2] < a[1] - 1                   # H3. [Tweak a_1 and a_2.]
+            a[1] -= 1
+            a[2] += 1
+            continue
+        var j: int = 3                       # H4. [Find j.]
+        var s: int = a[1] + a[2] - 1
+        while a[j] >= a[1] - 1
+            s += a[j]
+            j += 1
+        if j > m                             # H5. [Increase a_j.]
+            break
+        var x: int = a[j] + 1
+        a[j] = x
+        j -= 1
+        while j > 1                          # H6. [Tweak a_1 .. a_j.]
+            a[j] = x
+            s -= x
+            j -= 1
+        a[1] = s
+    return out
+
+# -- Vol. 3 6.2.2: Algorithms T and D, tree search, insertion and deletion ------------------
+# An unbalanced binary search tree in arrays (KEY, LLINK, RLINK; -1 = LAMBDA), node 0 a head
+# whose RLINK is the root. Algorithm D deletes the node a link field Q points to, replacing it
+# by its successor when it has two children (Hibbard's deletion); the link field is named here
+# as (parent, side).
+class SearchTree
+    var key: List(int)
+    var llink: List(int)
+    var rlink: List(int)
+
+    cue init()
+        .key = [0]
+        .llink = [-1]
+        .rlink = [-1]
+
+    def link(p: int, side: int): int
+        if side < 0
+            return .llink[p]
+        return .rlink[p]
+
+    def setLink(p: int, side: int, v: int)
+        if side < 0
+            .llink[p] = v
+        else
+            .rlink[p] = v
+
+    # Algorithm T: true if k was inserted, false if present.
+    def insert(k: int): bool
+        var parent: int = 0
+        var side: int = 1
+        var p: int = .rlink[0]
+        while p >= 0                         # T2. [Compare.]
+            if k == .key[p]
+                return false
+            parent = p
+            side = if(k < .key[p], -1, 1)    # T3 / T4. [Move left / right.]
+            p = .link(p, side)
+        .key.add(k)                          # T5. [Insert into tree.]
+        .llink.add(-1)
+        .rlink.add(-1)
+        .setLink(parent, side, .key.count() - 1)
+        return true
+
+    # Algorithm D: delete k; false if absent.
+    def delete(k: int): bool
+        var qp: int = 0                      # Q = LINK(qside, qp): the field pointing at T
+        var qside: int = 1
+        var t: int = .rlink[0]
+        while t >= 0 and .key[t] != k
+            qp = t
+            qside = if(k < .key[t], -1, 1)
+            t = .link(t, qside)
+        if t < 0
+            return false
+        var q: int = -1
+        if .rlink[t] < 0                     # D1. [Is RLINK null?]
+            q = .llink[t]
+        else
+            var r: int = .rlink[t]           # D2. [Find successor.]
+            if .llink[r] < 0
+                .llink[r] = .llink[t]
+                q = r
+            else
+                var s: int = .llink[r]       # D3. [Find null LLINK.]
+                while .llink[s] >= 0
+                    r = s
+                    s = .llink[r]
+                .llink[s] = .llink[t]
+                .llink[r] = .rlink[s]
+                .rlink[s] = .rlink[t]
+                q = s
+        .setLink(qp, qside, q)               # D4. [Free the node.] (Q <- q; T is unreachable)
+        return true
+
+    def inorder(): List(int)
+        var out = List(int)()
+        var stack = List(int)()
+        var p: int = .rlink[0]
+        while true
+            if p >= 0
+                stack.add(p)
+                p = .llink[p]
+            else if stack.count() > 0
+                p = stack.pop() catch -1
+                out.add(.key[p])
+                p = .rlink[p]
+            else
+                break
+        return out

@@ -69,6 +69,11 @@ contract (`require` / `ensure` / `invariant`): checked in an ordinary build, rem
 | `plainChanges` — Algorithm P, plain changes | Vol. 4A §7.2.1.2 | n! distinct permutations for n = 1..8, each one adjacent transposition from the last |
 | `sidewaysAddition32`, `rulerFunction` — bitwise tricks | Vol. 4A §7.1.3 | bit-by-bit counting over every x < 2²⁰ and 20,000 random 32-bit x |
 | `queensBitwise` — bitwise backtracking | Vol. 4B §7.2.2 | n queens for n = 1..12 (OEIS A000170, 14200 at n = 12); dancing links agrees for n ≤ 8 |
+| `toDecimal` — radix conversion, Method 2a (repeated short division by 10⁴) | Vol. 2 §4.4 | the decimal expansions of 2¹⁰⁰, 2²⁰⁰, 3¹⁰⁰ and 100!; their last nine digits by Algorithm A; the runtime's own int128 printer on 300 random values |
+| `SearchTree` — Algorithms T and D, tree insertion and (Hibbard) deletion | Vol. 3 §6.2.2 | 20,000 random insertions and deletions against a membership array; symmetric order = the live keys every 1,000 operations |
+| `LinearProbing` — Algorithms L and R, linear probing with deletion | Vol. 3 §6.4 | 40,000 random operations against a membership array; after every 1,000, EVERY live key must still be found -- the property a deletion that breaks a probe chain loses silently |
+| `mixedRadixGray` — Algorithm H, loopless reflected mixed-radix Gray | Vol. 4A §7.2.1.1 | the product of the radices for five radix lists; every tuple distinct and in range; each step changes one coordinate by ±1 |
+| `partitionsInto` — Algorithm H, partitions into exactly m parts | Vol. 4A §7.2.1.4 | summed over m, p(n) for n = 1..20; for each m, exactly Algorithm P's partitions having m parts |
 
 Every check has also been seen to FAIL: a one-line mutation of the generator's lag, of
 heapsort's step H6, of quicksort's step Q4, of the Gray-code output, of Algorithm C's purify
@@ -107,6 +112,17 @@ memory cap stops; and the Algorithm T mutant above. One more finding from it: wi
 Miller–Rabin mutated, `factor128` looped forever trying to split a prime it had been told was
 composite; it now asserts after 100 failed polynomials instead of hanging.
 
+The fourth batch (2026-10-13) also passed everything on its first run, and its five mutants
+were all killed (23 in the harness): inner decimal groups padded to three digits (178 of 300
+conversions wrong); Algorithm R without its wrap-around case (66 disagreements, and three live
+keys LOST -- found only by the "every live key is still found" sweep); Algorithm H of 7.2.1.4
+tweaking while a_2 < a_1 (596 bad partitions); and, by symptom, a Gray-code H5 that forgets to
+reset f_{j+1} (a runaway, stopped by the memory cap) and a tree deletion that drops the
+successor's right subtree (a cycle in the links, stopped by the time limit). The first run
+found a mistake of mine that Zebra should have caught: `partitionsInto` fell off its end
+without `return out`, and Zebra passed it to zig, which refused it in generated code --
+zebra-language BUG-568 (the missing-return check runs only on the ROOT module).
+
 ## Notes for a maintainer
 
 - **`ran_array` is a translation, not Knuth's file.** `rng.c` is public domain on the
@@ -137,10 +153,10 @@ composite; it now asserts after 100 failed polynomials instead of hanging.
   every solution under the box's symmetries; the box has no centre row or column, so no
   solution is its own image. The 3 × 20 and 4 × 15 counts instead divide all solutions by 4,
   which is exact because twelve different pieces cannot each map onto themselves.
-- **One workaround for a zebra-language bug, marked where it sits:** the plain-changes test
-  names its loop variable `pv`, because a `for v in ...` variable cannot be typed while another
-  block of the same function declares a List named `v` (BUG-566, filed 2026-10-13). Rename it
-  back once that is fixed -- the test of the fix.
+- **One workaround for a zebra-language bug, marked where it sits:** the radix-conversion
+  test's digit helper is `digitsOf128`, not `int128Digits`, because a name that BEGINS with a
+  sized type name lexed as that type (BUG-567). The plain-changes test's loop variable is `v`
+  again: BUG-566, which forced a rename there, is fixed in zebra-language `25ac283`.
 - **`mulMod128` has two paths.** Below 2⁶³ it multiplies directly (the product fits in 126
   bits); above, it doubles and adds, keeping every intermediate below 2m, which is what lets
   rho work on 2⁶⁷ − 1 and F₆ = 2⁶⁴ + 1.

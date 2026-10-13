@@ -66,6 +66,19 @@ MUTANTS = [
      '                limit = listIndexOf(chain, a[j - 1])', '                limit = chain.count()', 'merge insertion:'),
     ('karatsuba: forget to subtract u1 v1 from the middle term', 'taocp.zbr',
      '    digitsSubInPlace(z1, z2, b)\n', '', 'karatsuba:'),
+    # batch 4 (2026-10-13)
+    ('radix conversion: pad inner groups to 3 digits, not 4', 'taocp.zbr',
+     '        while g.len < 4\n', '        while g.len < 3\n', 'radix conversion vs int128'),
+    ('linear probing: R4 forgets the wrap-around case', 'taocp.zbr',
+     '            if (i <= r and r < j) or (r < j and j < i) or (j < i and i <= r)',
+     '            if (i <= r and r < j) or (r < j and j < i)', 'linear probing:'),
+    ('mixed-radix Gray: H5 forgets to reset f_{j+1}', 'taocp.zbr',
+     '            f[j] = f[j + 1]\n            f[j + 1] = j + 1\n', '            f[j] = f[j + 1]\n', 'mixed-radix Gray:'),
+    ('partitions into m parts: H3 tweaks while a_2 < a_1', 'taocp.zbr',
+     '        if a[2] < a[1] - 1                   # H3.', '        if a[2] < a[1]                       # H3.',
+     'partitions into m parts'),
+    ('tree deletion: D3 drops the successor\'s right subtree', 'taocp.zbr',
+     '                .llink[r] = .rlink[s]\n', '', 'search tree insert/delete:'),
 ]
 
 
